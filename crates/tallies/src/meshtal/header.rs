@@ -32,6 +32,48 @@ pub(crate) struct HeaderLabels {
 impl HeaderLabels {
     fn parse(kind: LabelKind, line: &str) -> Option<HeaderLabels> {
         let after = line.split_once(':')?.1;
+        Self::fixed_width(kind, after).or_else(|| Self::spaced(kind, after))
+    }
+
+    /// The labels in D1SUNED's fields (`f10.3` nuclides, `f11.3` cells,
+    /// `es9.2` decay times), which a label filling its field runs into the
+    /// one before (`     0.0011234567.002`); None when the text isn't in them.
+    fn fixed_width(kind: LabelKind, after: &str) -> Option<HeaderLabels> {
+        let width = match kind {
+            LabelKind::Nuclide | LabelKind::Parent => 10,
+            LabelKind::Cell => 11,
+            LabelKind::DecayTime => 9,
+            LabelKind::Line => return None,
+        };
+        let text = after.trim_end();
+        if !text.is_ascii() {
+            return None;
+        }
+        let mut values = Vec::new();
+        let mut overflowed = false;
+        for field in text.as_bytes().chunks(width) {
+            let field = std::str::from_utf8(field).ok()?.trim();
+            if field.is_empty() {
+                return None;
+            }
+            if field.bytes().all(|b| b == b'*') {
+                overflowed = true;
+                break;
+            }
+            values.push(field.parse::<f64>().ok()?);
+        }
+        if values.is_empty() && !overflowed {
+            return None;
+        }
+        Some(HeaderLabels {
+            kind,
+            values,
+            overflowed,
+        })
+    }
+
+    /// The labels split at blanks.
+    fn spaced(kind: LabelKind, after: &str) -> Option<HeaderLabels> {
         // D1SUNED writes each label in 10 columns, so an overflowed one
         // runs into its neighbours: take what reads before the first `*`.
         let (good, overflowed) = match after.find('*') {
@@ -477,5 +519,34 @@ mod tests {
         assert_eq!(parse_cylindrical_origin(line).unwrap().2, [0.0, 1.0, 0.0]);
         let mcnp6 = "origin at 0 0 0 axis in 0 0 1 direction, VEC direction 0 1 0";
         assert_eq!(parse_cylindrical_origin(mcnp6).unwrap().2, [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn labels_that_fill_their_fields() {
+        // Cells in 11 columns: a 7-digit cell runs into the label before it.
+        let l = HeaderLabels::parse(
+            LabelKind::Cell,
+            "    Cells list:      0.0011234567.002     20.003",
+        )
+        .unwrap();
+        assert_eq!(l.values, [0.001, 1234567.002, 20.003]);
+        assert!(!l.overflowed);
+        let l = HeaderLabels::parse(
+            LabelKind::Nuclide,
+            "    Daughter Nuclides list:     0.001 26059.002**********",
+        )
+        .unwrap();
+        assert_eq!(l.values, [0.001, 26059.002]);
+        assert!(l.overflowed);
+        let l = HeaderLabels::parse(LabelKind::DecayTime, "    Decay times: 1.00E+00 2.00E+00")
+            .unwrap();
+        assert_eq!(l.values, [1.0, 2.0]);
+        // Other spacing still reads, split at blanks.
+        let l = HeaderLabels::parse(
+            LabelKind::Nuclide,
+            "Daughter Nuclides list: 0.001 26059.002",
+        )
+        .unwrap();
+        assert_eq!(l.values, [0.001, 26059.002]);
     }
 }

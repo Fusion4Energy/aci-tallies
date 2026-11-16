@@ -71,7 +71,9 @@ def test_an_overflowed_list_from_the_input():
     f = meshtal.open(MSHT, input=Input(INPUT))
     assert not f.failed
     t = f[94]
-    np.testing.assert_allclose(t.energy.labels, [0.001, 41092900.002, 99973182.003])
+    np.testing.assert_allclose(
+        t.energy.labels, [0.001, 41092900.002, 99973182.003], rtol=0, atol=1e-6
+    )
     np.testing.assert_array_equal(t.result, expected([1, 2, 3, TOTAL], [1]))
 
 

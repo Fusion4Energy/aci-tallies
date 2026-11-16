@@ -194,7 +194,8 @@ fn recovered(
         || printed
             .iter()
             .zip(&labels)
-            .any(|(a, b)| (a - b).abs() > 1e-6 * a.abs().max(1.0))
+            // Absolute: the labels are ids, which a relative tolerance blurs.
+            .any(|(a, b)| (a - b).abs() > 1e-6)
     {
         return Err(format!(
             "the header's {} list {printed:?} does not start like the card's {labels:?}",
