@@ -52,14 +52,16 @@ In this order, for every change:
 
 ## Versions and releases
 
-The version lives in `Cargo.toml` (`[workspace.package]`, and the exact
-`aci-tallies-geom` pin in `crates/tallies/Cargo.toml`). A push to `master`
-whose version has no tag yet is released
+The version lives in the root `Cargo.toml`: `version` at the end of
+`[workspace.package]`, and right under it the exact `aci-tallies-geom` pin in
+`[workspace.dependencies]` (crates.io needs it), which must say the same. A
+push to `master` whose version has no tag yet is released
 (`.github/workflows/release.yml`); nobody types a tag. So:
 
 - Feature branches and PRs never change the version.
-- To release, on a clean, up-to-date `master`: `tools/release.sh X.Y.Z`
-  (sets both, updates `Cargo.lock`, commits), then push. The workflow tests,
+- To release, on an up-to-date `master`: change those two lines, build
+  (which updates `Cargo.lock`), commit and push; or `tools/release.sh X.Y.Z`,
+  which does the same and commits. The workflow checks the two agree, tests,
   builds the wheels, publishes to PyPI and crates.io, and the GitHub release
   creates the tag `vX.Y.Z` on that commit.
 - Versions are never published twice.

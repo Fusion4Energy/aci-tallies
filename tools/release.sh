@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Raise the version to X.Y.Z in one commit: the workspace's in Cargo.toml, the
-# exact aci-tallies-geom pin in crates/tallies/Cargo.toml (the Python package
-# takes the workspace version) and Cargo.lock.
+# Raise the version to X.Y.Z in one commit: the workspace's in Cargo.toml and
+# the exact aci-tallies-geom pin under it (the Python package takes the
+# workspace version), and Cargo.lock. The same as editing the two lines by hand
+# and building.
 #
 #   tools/release.sh 0.2.0
 #
@@ -29,11 +30,11 @@ old=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.to
 
 # `sed -i.bak` works with both GNU and BSD sed.
 sed -i.bak "/^\[workspace.package\]/,/^\[/s/^version = \".*\"/version = \"$version\"/" Cargo.toml
-sed -i.bak "s/\(aci-tallies-geom = .*version = \"=\)[^\"]*\"/\1$version\"/" crates/tallies/Cargo.toml
-rm -f Cargo.toml.bak crates/tallies/Cargo.toml.bak
+sed -i.bak "s/^\(aci-tallies-geom = .*version = \"=\)[^\"]*\"/\1$version\"/" Cargo.toml
+rm -f Cargo.toml.bak
 grep -q "^version = \"$version\"" Cargo.toml ||
   { echo "failed to set the workspace version" >&2; exit 1; }
-grep -q "aci-tallies-geom = .*version = \"=$version\"" crates/tallies/Cargo.toml ||
+grep -q "^aci-tallies-geom = .*version = \"=$version\"" Cargo.toml ||
   { echo "failed to set the aci-tallies-geom pin" >&2; exit 1; }
 
 # Only the workspace's own entries in Cargo.lock change.

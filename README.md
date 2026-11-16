@@ -262,9 +262,10 @@ pytest tests/python && mypy python/aci_tallies tests/python && ruff check python
 slower at parsing. The fixtures under `tests/fixtures` are MCNP output; each
 `.mcnp` says how to regenerate it (`tests/fixtures/d1suned`: its README).
 
-Releases: `tools/release.sh X.Y.Z` on `master` raises the version in
-`Cargo.toml` and commits; pushing it publishes to PyPI and crates.io and
-tags `vX.Y.Z` (`AGENTS.md`, "Versions and releases").
+Releases: raise `version` and the `aci-tallies-geom` pin under it in
+`Cargo.toml` (or `tools/release.sh X.Y.Z`); pushing that to `master`
+publishes to PyPI and crates.io and tags `vX.Y.Z` (`AGENTS.md`, "Versions
+and releases").
 
 ## License
 

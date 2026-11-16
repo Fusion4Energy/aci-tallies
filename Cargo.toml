@@ -7,13 +7,19 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.3"
 edition = "2021"
 license = "EUPL-1.2"
 authors = ["Alvaro Cubi"]
 repository = "https://github.com/Fusion4Energy/aci-tallies"
 keywords = ["mcnp", "meshtal", "mctal", "tally", "monte-carlo"]
 categories = ["parser-implementations", "science"]
+# The release: a push to master with a version that has no tag yet publishes
+# it. Change both lines together (crates.io needs aci-tallies to name the exact
+# aci-tallies-geom it was built with); the Release workflow checks they agree.
+version = "0.1.3"
+
+[workspace.dependencies]
+aci-tallies-geom = { path = "crates/geom", version = "=0.1.3", default-features = false }
 
 [profile.release]
 opt-level = 3

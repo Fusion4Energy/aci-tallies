@@ -1,5 +1,7 @@
 # A push to master whose Cargo.toml version has no tag yet is a release (the
-# version is raised with `tools/release.sh X.Y.Z`; nobody types a tag). Tests
+# version and the aci-tallies-geom pin under it are raised together, by hand or
+# with `tools/release.sh X.Y.Z`; nobody types a tag; a Cargo.lock left behind
+# is updated by the build). Tests
 # run, wheels are built for every platform, then the Python package goes to
 # PyPI, the crates to crates.io, and the GitHub release creates the tag vX.Y.Z
 # on the commit built. Nothing is published unless every test and build
@@ -40,8 +42,8 @@ jobs:
         run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
           [ -n "$version" ] || { echo "::error::no version in [workspace.package]"; exit 1; }
-          grep -q "aci-tallies-geom = .*version = \"=$version\"" crates/tallies/Cargo.toml ||
-            { echo "::error::the aci-tallies-geom pin in crates/tallies/Cargo.toml is not =$version"; exit 1; }
+          grep -q "^aci-tallies-geom = .*version = \"=$version\"" Cargo.toml ||
+            { echo "::error::Cargo.toml: set the aci-tallies-geom pin in [workspace.dependencies] to \"=$version\", as the version"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ -n "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
             echo "v$version is already released"
@@ -111,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish --workspace --locked --dry-run
+      - run: cargo publish --workspace --dry-run
 
   publish-pypi:
     needs: [check, test, wheels, sdist, crates-dry-run]
@@ -147,7 +149,7 @@ jobs:
         id: auth
         if: env.CARGO_REGISTRY_TOKEN == ''
       # Publishes aci-tallies-geom, then aci-tallies (aci-tallies-py has publish = false).
-      - run: cargo publish --workspace --locked
+      - run: cargo publish --workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || env.CARGO_REGISTRY_TOKEN }}
 
