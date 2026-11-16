@@ -1,6 +1,7 @@
 //! The Python extension module `aci_tallies._native`; the package around
 //! it (`python/aci_tallies`) is what users import.
 
+mod cdgs;
 mod common;
 mod cuv;
 mod geometry;
@@ -10,7 +11,7 @@ mod meshtal;
 use pyo3::prelude::*;
 
 /// The format of the file at `path`, from its first bytes: `"meshtal"`,
-/// `"mctal"`, `"cuvmsh"` or `"meshinfo"`, or None when it isn't one this
+/// `"mctal"`, `"cuvmsh"`, `"meshinfo"` or `"cdgs"`, or None when it isn't one this
 /// package reads.
 #[pyfunction]
 fn detect(path: std::path::PathBuf) -> PyResult<Option<&'static str>> {
@@ -24,6 +25,7 @@ fn detect(path: std::path::PathBuf) -> PyResult<Option<&'static str>> {
         aci_tallies::Format::Mctal => "mctal",
         aci_tallies::Format::Cuvmsh => "cuvmsh",
         aci_tallies::Format::Meshinfo => "meshinfo",
+        aci_tallies::Format::Cdgs => "cdgs",
     }))
 }
 
@@ -35,6 +37,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cuv::open_cuvmsh, m)?)?;
     m.add_function(wrap_pyfunction!(cuv::open_meshinfo, m)?)?;
     m.add_function(wrap_pyfunction!(cuv::open_cuv_mesh, m)?)?;
+    m.add_function(wrap_pyfunction!(cdgs::open_cdgs, m)?)?;
+    m.add_class::<cdgs::PyCdgsFile>()?;
+    m.add_class::<cdgs::PyCdgsInfo>()?;
     m.add_class::<cuv::PyCuvFile>()?;
     m.add_class::<cuv::PyCuvInfo>()?;
     m.add_class::<cuv::PyCuvPairs>()?;

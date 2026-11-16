@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use aci_tallies_geom::mcnp_input::{FmeshCard, FmeshError};
 
-use super::header::SectionHeader;
-use crate::common::{Input, Warning};
+use super::header::{HeaderLabels, SectionHeader};
+use crate::common::{Input, LabelKind, Warning};
 use crate::meshtal::model::Geometry;
 
 /// The FMESH cards of an MCNP input, by tally number.
@@ -107,34 +107,117 @@ fn apply(hdr: &mut SectionHeader, card: &FmeshCard) -> Result<(), String> {
             same("theta", t, et, &fixed(THETA_TOL))?;
             same("origin", origin, eo, &sig3)?;
             same("axis", axis, ea, &sig3)?;
-            same("vec", vec, ev, &sig3)?;
+            // An MCNP5 header has no VEC to compare: the input's is the one.
+            if hdr.vec_printed {
+                same("vec", vec, ev, &sig3)?;
+            }
         }
         _ => return Err("the header and the input disagree on GEOM".into()),
     }
-    // A meshinfo header has no energy bounds to compare.
-    if let Some(e) = card
-        .energy_bounds
-        .as_ref()
-        .filter(|_| !hdr.energy_bounds.is_empty())
-    {
+    // A meshinfo header has no energy bounds to compare, nor has a
+    // D1SUNED one whose bins are nuclides (or cells, decay times) instead.
+    let energy_bounded = hdr.energy_labels.is_none() && !hdr.energy_bounds.is_empty();
+    let time_bounded = hdr.time_labels.is_none();
+    if let Some(e) = card.energy_bounds.as_ref().filter(|_| energy_bounded) {
         same("energy", &hdr.energy_bounds, e, &sig3)?;
     }
-    if let Some(t) = &card.time_bounds {
+    if let Some(t) = card.time_bounds.as_ref().filter(|_| time_bounded) {
         same("time", &hdr.time_bounds, t, &sig3)?;
     }
+    let energy_labels = match &hdr.energy_labels {
+        Some(l) if l.overflowed => Some(recovered(
+            l,
+            card.energy_tag.as_deref(),
+            card.energy_values.as_deref(),
+            "ETAG/EMESH",
+        )?),
+        _ => None,
+    };
+    let time_labels = match &hdr.time_labels {
+        Some(l) if l.overflowed => Some(recovered(
+            l,
+            card.time_tag.as_deref(),
+            card.time_values.as_deref(),
+            "TTAG/TMESH",
+        )?),
+        _ => None,
+    };
 
     hdr.geometry = card.geometry().map_err(|e| e.to_string())?;
-    if let Some(e) = card
-        .energy_bounds
-        .as_ref()
-        .filter(|_| !hdr.energy_bounds.is_empty())
-    {
+    if let Some(e) = card.energy_bounds.as_ref().filter(|_| energy_bounded) {
         hdr.energy_bounds = e.clone();
     }
-    if let Some(t) = &card.time_bounds {
+    if let Some(t) = card.time_bounds.as_ref().filter(|_| time_bounded) {
         hdr.time_bounds = t.clone();
     }
+    if let Some(l) = energy_labels {
+        hdr.energy_labels = Some(l);
+    }
+    if let Some(l) = time_labels {
+        hdr.time_labels = Some(l);
+    }
     Ok(())
+}
+
+/// The labels D1SUNED meant to print for an overflowed list, from the
+/// FMESH card's tag and bins: `0.001` (every other nuclide or cell), then
+/// `<bin>.<n>` for the n-th bin from 2 on. The labels the header did
+/// print must agree.
+fn recovered(
+    header: &HeaderLabels,
+    tag: Option<&str>,
+    values: Option<&[f64]>,
+    card_words: &str,
+) -> Result<HeaderLabels, String> {
+    let expected = match header.kind {
+        LabelKind::Nuclide => &["nuc"][..],
+        LabelKind::Parent => &["parent", "nuc"][..],
+        LabelKind::Cell => &["cel", "cell"][..],
+        LabelKind::DecayTime | LabelKind::Line => &[][..],
+    };
+    let (Some(tag), Some(values)) = (tag, values) else {
+        return Err(format!(
+            "the header's {} list overflowed and the card has no {card_words}",
+            header.kind.name()
+        ));
+    };
+    if !expected.contains(&tag) {
+        return Err(format!(
+            "the header's {} list overflowed but the card's tag is {tag:?}",
+            header.kind.name()
+        ));
+    }
+    // `<bin>.<n>` has three digits for n: past 999 bins it can't be told
+    // from a smaller n (`.1000` is `.1`).
+    if values.len() + 1 > 999 {
+        return Err(format!(
+            "the card's {card_words} has {} bins: more than the 999 a label can number",
+            values.len() + 1
+        ));
+    }
+    let mut labels = vec![0.001];
+    for (n, v) in values.iter().enumerate() {
+        let label = format!("{}.{:03}", *v as i64, n + 2);
+        labels.push(label.parse().map_err(|_| format!("bad label {label}"))?);
+    }
+    let printed = &header.values;
+    if printed.len() > labels.len()
+        || printed
+            .iter()
+            .zip(&labels)
+            // Absolute: the labels are ids, which a relative tolerance blurs.
+            .any(|(a, b)| (a - b).abs() > 1e-6)
+    {
+        return Err(format!(
+            "the header's {} list {printed:?} does not start like the card's {labels:?}",
+            header.kind.name()
+        ));
+    }
+    Ok(HeaderLabels {
+        kind: header.kind,
+        values: labels,
+        overflowed: false,
+    })
 }
 
 /// A section header with the input's exact geometry applied (when given
@@ -182,6 +265,12 @@ pub(crate) fn prepare_from(
                 "{problem}; geometry is from the {file} header"
             )));
         }
+    }
+    if !hdr.vec_printed && !geometry_from_input {
+        warnings.push(Warning::new(format!(
+            "the {file} header prints no cylinder VEC (MCNP5): MCNP's default, 1 0 0, is \
+             assumed (give the input for the VEC the run used)"
+        )));
     }
     // MCNP prints bounds with 2 decimals (3 for theta), so bins finer than
     // that collapse to zero width in the header. The values are still fine;

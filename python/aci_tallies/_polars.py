@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ._bins import axis_columns, centres, mctal_axis_columns
+from ._bins import axis_columns, axis_labels, centres, mctal_axis_columns
 from ._extras import require
 
 if TYPE_CHECKING:
@@ -37,8 +37,12 @@ def meshtal_frame(tally: MeshTally) -> Any:
     ):
         if len(axis) > 1:
             low, high, is_total = axis_columns(axis)
-            columns[f"{name}_low"] = _spread(low, inner, outer)
-            columns[f"{name}_high"] = _spread(high, inner, outer)
+            labels = axis_labels(axis)
+            if labels is not None:
+                columns[f"{name}_{axis.kind}"] = _spread(labels, inner, outer)
+            else:
+                columns[f"{name}_low"] = _spread(low, inner, outer)
+                columns[f"{name}_high"] = _spread(high, inner, outer)
             if axis.total:
                 columns[f"{name}_is_total"] = _spread(is_total, inner, outer)
     names = tally.geometry.axis_names

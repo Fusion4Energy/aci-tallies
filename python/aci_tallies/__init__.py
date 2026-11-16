@@ -13,15 +13,16 @@ tallies, with errors propagated.
 >>> f.read(14, energy="total")        # read only MCNP's Total energy bin
 
 Formats: `aci_tallies.meshtal` (FMESH mesh tallies), `aci_tallies.mctal`
-(F tallies) and `aci_tallies.cuv` (D1SUNED cell-under-voxel meshes:
-`cuvmsh` and `meshinfo`).
+(F tallies), `aci_tallies.cuv` (D1SUNED cell-under-voxel meshes:
+`cuvmsh` and `meshinfo`) and `aci_tallies.cdgs` (D1SUNED decay gamma
+sources).
 """
 
 from __future__ import annotations
 
 import os
 
-from . import cuv, mctal, meshtal
+from . import cdgs, cuv, mctal, meshtal
 from ._native import Axis, Geometry, Input, ReadWarning, detect
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "Geometry",
     "Input",
     "ReadWarning",
+    "cdgs",
     "cuv",
     "detect",
     "mctal",
@@ -39,7 +41,7 @@ __all__ = [
 
 def open(
     path: str | os.PathLike[str], input: str | os.PathLike[str] | Input | None = None
-) -> meshtal.MeshtalFile | mctal.MctalFile | cuv.CuvFile:
+) -> meshtal.MeshtalFile | mctal.MctalFile | cuv.CuvFile | cdgs.CdgsFile:
     """Open the tally file at `path`, whatever its format (told from its
     contents). `input` is the MCNP input it came from (a path or an
     `Input`), for what the file itself doesn't say: see each format's
@@ -51,6 +53,8 @@ def open(
         return mctal.open(path, input=input)
     if kind in ("cuvmsh", "meshinfo"):
         return cuv.open(path, input=input)
+    if kind == "cdgs":
+        return cdgs.open(path)
     raise ValueError(
-        f"{os.fspath(path)!r} is not a file aci_tallies reads (meshtal, MCTAL, cuvmsh, meshinfo)"
+        f"{os.fspath(path)!r} is not a file aci_tallies reads (meshtal, MCTAL, cuvmsh, meshinfo, CDGS)"
     )

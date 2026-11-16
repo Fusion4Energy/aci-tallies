@@ -23,6 +23,7 @@
 
 use migjorn::{DataCard, Model};
 
+use crate::vec3::{normalize, perpendicular_unit, DEFAULT_VEC};
 use crate::{Geometry, Transform};
 
 /// One FMESH card of an MCNP input.
@@ -40,10 +41,21 @@ pub struct FmeshCard {
     pub local: Geometry,
     /// `TR=n`: the transform number and the transform it names.
     pub transform: Option<(u32, Transform)>,
-    /// Energy bin bounds in MeV, starting at 0, when the card has `EMESH`.
+    /// Energy bin bounds in MeV, starting at 0, when the card has `EMESH`
+    /// (and no `ETAG`).
     pub energy_bounds: Option<Vec<f64>>,
-    /// Time bin bounds in shakes, starting at -1e36, when it has `TMESH`.
+    /// Time bin bounds in shakes, starting at -1e36, when it has `TMESH`
+    /// (and no `TTAG`).
     pub time_bounds: Option<Vec<f64>>,
+    /// D1SUNED's `ETAG=`, lowercased (`nuc`, `parent`, `cel`, ...): what
+    /// `EMESH` lists in place of energies.
+    pub energy_tag: Option<String>,
+    /// D1SUNED's `TTAG=` the same way (`dtme`: decay times).
+    pub time_tag: Option<String>,
+    /// `EMESH` as written when the card has `ETAG`: its values are not bounds.
+    pub energy_values: Option<Vec<f64>>,
+    /// `TMESH` as written when the card has `TTAG`.
+    pub time_values: Option<Vec<f64>>,
     /// The `OUT=` value as written, lowercased.
     pub out: Option<String>,
     /// 1-based line of the card in the input.
@@ -376,14 +388,8 @@ fn read_card(model: &Model, card: DataCard, id: u32, line: usize) -> Result<Fmes
         },
         Some("cyl") | Some("rzt") => {
             let axs = normalize(triple("axs", [0.0, 0.0, 1.0])?).ok_or("AXS is zero")?;
-            let vec = triple("vec", [1.0, 0.0, 0.0])?;
-            let along = dot(vec, axs);
-            let vec = normalize([
-                vec[0] - along * axs[0],
-                vec[1] - along * axs[1],
-                vec[2] - along * axs[2],
-            ])
-            .ok_or("VEC is parallel to AXS")?;
+            let vec = perpendicular_unit(triple("vec", DEFAULT_VEC)?, axs)
+                .ok_or("VEC is parallel to AXS")?;
             let theta_bounds = required(axis("kmesh", "kints", 0.0)?, "kmesh")?;
             if theta_bounds.last() != Some(&1.0) {
                 return Err("the last KMESH bound must be 1 revolution".into());
@@ -419,14 +425,29 @@ fn read_card(model: &Model, card: DataCard, id: u32, line: usize) -> Result<Fmes
         }
     };
 
+    // A D1SUNED tag (`ETAG`/`TTAG`) makes EMESH/TMESH list nuclides, cells
+    // or decay times: values, not bin bounds.
+    let (energy_tag, time_tag) = (word("etag")?, word("ttag")?);
+    let (energy_bounds, energy_values) = match energy_tag {
+        Some(_) => (None, numbers("emesh")?),
+        None => (axis("emesh", "eints", 0.0)?, None),
+    };
+    let (time_bounds, time_values) = match time_tag {
+        Some(_) => (None, numbers("tmesh")?),
+        None => (axis("tmesh", "tints", -1e36)?, None),
+    };
     Ok(FmeshCard {
         id,
         particle: card.particle().map(str::to_owned),
         energy_weighted: card.starred(),
         local,
         transform,
-        energy_bounds: axis("emesh", "eints", 0.0)?,
-        time_bounds: axis("tmesh", "tints", -1e36)?,
+        energy_bounds,
+        time_bounds,
+        energy_tag,
+        time_tag,
+        energy_values,
+        time_values,
         out: word("out")?,
         line,
     })
@@ -556,15 +577,6 @@ fn roundest_near(v: f64, lo: f64) -> impl Iterator<Item = f64> {
         (r != v && (r - v).abs() <= tol).then_some(r)
     });
     zero.into_iter().chain(decimals).chain(std::iter::once(v))
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn normalize(a: [f64; 3]) -> Option<[f64; 3]> {
-    let n = dot(a, a).sqrt();
-    (n > 0.0 && n.is_finite()).then(|| [a[0] / n, a[1] / n, a[2] / n])
 }
 
 #[cfg(test)]

@@ -95,6 +95,13 @@ impl PyMctalFile {
         &self.reader.header().probid
     }
 
+    /// The tally numbers the header lists (its `ntal` list), in order: more
+    /// than `ids` when the file is cut short.
+    #[getter]
+    fn declared_ids(&self) -> Vec<u32> {
+        self.reader.header().tallies.clone()
+    }
+
     /// The dump the tallies are from.
     #[getter]
     fn dump(&self) -> u64 {

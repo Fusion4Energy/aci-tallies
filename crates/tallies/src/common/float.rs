@@ -141,9 +141,44 @@ fn slow(tok: &[u8], exponent_at: Option<usize>) -> Option<f64> {
     buf.parse().ok()
 }
 
+/// Floats in fixed-width fields of `width` characters (Fortran `fw.d`), so
+/// that values running into each other still split; whitespace-separated
+/// when the text is not a whole number of fields.
+pub(crate) fn fixed_floats(s: &str, width: usize) -> Option<Vec<f64>> {
+    let s = s.trim_end();
+    let bytes = s.as_bytes();
+    let v: Option<Vec<f64>> = if bytes.len().is_multiple_of(width) {
+        bytes.chunks(width).map(|c| parse(c.trim_ascii())).collect()
+    } else {
+        s.split_whitespace().map(|w| parse(w.as_bytes())).collect()
+    };
+    v.filter(|v| !v.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_width_splits_merged_values() {
+        assert_eq!(
+            fixed_floats("0.000000002.50000000", 10),
+            Some(vec![0.0, 2.5])
+        );
+        assert_eq!(
+            fixed_floats("   0.00000   1.00000", 10),
+            Some(vec![0.0, 1.0])
+        );
+        assert_eq!(
+            fixed_floats("  -1000.00-999999.99", 10),
+            Some(vec![-1000.0, -999999.99])
+        );
+        assert_eq!(
+            fixed_floats("     0.000     1.000   ", 10),
+            Some(vec![0.0, 1.0])
+        );
+        assert_eq!(fixed_floats("  ", 10), None);
+    }
     use proptest::prelude::*;
 
     fn same(tok: &str, want: f64) {

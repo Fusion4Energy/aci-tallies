@@ -1,0 +1,10 @@
+D1SUNED discrete bins
+1 0 -1
+2 0 1
+
+1 so 100
+
+mode p
+nps 1000
+FMESH94:p origin 0 0 0 imesh 2 iints 2 jmesh 1 kmesh 1
+     etag=nuc emesh 41092900 99973182

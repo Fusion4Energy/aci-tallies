@@ -24,7 +24,7 @@ use super::matrix::{self, Layout, Marked, Marker};
 use super::model::{Tally, TallyBin, TallyInfo};
 use crate::common::scan::{self, Chunk, Index, Mark};
 use crate::common::source::{Opened, Source};
-use crate::common::{Axis, Input, ReadError, Warning};
+use crate::common::{Input, ReadError, Warning};
 
 /// An indexed meshtal file.
 pub struct Reader {
@@ -467,6 +467,14 @@ fn index_body(
     end_row: u64,
 ) -> Result<Body, String> {
     let hdr = p.header;
+    if let Some(l) = hdr.overflowed_labels() {
+        return Err(format!(
+            "the {} list overflowed its field (\"**********\") after {} label(s); \
+             give the MCNP input (input=) to read it from the FMESH card's ETAG/TTAG bins",
+            l.kind.name(),
+            l.values.len()
+        ));
+    }
     let mut warnings = Vec::new();
     let marks: Vec<&Mark<Kind>> = marks.iter().filter(|m| m.start >= data_start).collect();
     let first = marks.first().filter(|m| m.start == data_start);
@@ -487,9 +495,9 @@ fn index_body(
         Some(Kind::Columns) => {
             let m = first.expect("matched");
             let row = opened.read(m.start..m.end).map_err(io_error)?;
-            let columns = Columns::from_header_row(&row);
-            let energy = Axis::mcnp(hdr.energy_bounds.clone());
-            let time = Axis::mcnp(hdr.time_bounds.clone());
+            let columns = Columns::from_header_row(&row)?;
+            let energy = hdr.energy_axis(None);
+            let time = hdr.time_axis(None);
             let (ni, nj, nk) = hdr.geometry.dims();
             let expected = (energy.len() * time.len() * ni * nj * nk) as u64;
             let first_row = m.row + 1;
@@ -536,8 +544,8 @@ fn index_body(
             )?;
             warnings.extend(blocks.warnings);
             warnings.extend(p.warnings.iter().cloned());
-            let energy = Axis::bounded(hdr.energy_bounds.clone(), blocks.energy_total);
-            let time = Axis::bounded(hdr.time_bounds.clone(), blocks.time_total);
+            let energy = hdr.energy_axis(Some(blocks.energy_total));
+            let time = hdr.time_axis(Some(blocks.time_total));
             Ok(Body {
                 info: info(energy, time, layout.out_format(), warnings),
                 data: Data::Matrix {

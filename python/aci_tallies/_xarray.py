@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ._bins import axis_columns, centres, mctal_axis_columns
+from ._bins import axis_columns, axis_labels, centres, mctal_axis_columns
 from ._extras import require
 
 if TYPE_CHECKING:
@@ -22,8 +22,12 @@ def meshtal_dataset(tally: MeshTally) -> Any:
     coords: dict[str, Any] = {}
     for name, axis in (("energy", tally.energy), ("time", tally.time)):
         low, high, is_total = axis_columns(axis)
-        coords[f"{name}_low"] = (name, low)
-        coords[f"{name}_high"] = (name, high)
+        labels = axis_labels(axis)
+        if labels is not None:
+            coords[f"{name}_{axis.kind}"] = (name, labels)
+        else:
+            coords[f"{name}_low"] = (name, low)
+            coords[f"{name}_high"] = (name, high)
         coords[f"{name}_is_total"] = (name, is_total)
     for name, bounds in zip(names, tally.geometry.bounds):
         coords[name] = (name, centres(bounds))

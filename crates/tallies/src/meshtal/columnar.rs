@@ -16,7 +16,9 @@ use super::model::OutFormat;
 /// The columns of a block, from its column header row.
 ///
 /// `Energy` (if present) comes first and `Time` (if present) right after
-/// it: `Time X Y Z ...`, `Energy Time X Y Z ...`.
+/// it: `Time X Y Z ...`, `Energy Time X Y Z ...`. D1SUNED names discrete
+/// bins there instead (`Nuclide bin X Y Z ...`, `Energy Nuclide X ...`,
+/// `Nuclide Time X ...`, `Cell bin X ...`): one column each.
 #[derive(Clone, Debug)]
 pub(crate) struct Columns {
     /// Where Result is: after the Energy/Time and coordinate columns.
@@ -28,23 +30,38 @@ pub(crate) struct Columns {
 }
 
 impl Columns {
-    pub fn from_header_row(line: &[u8]) -> Columns {
-        let mut tokens = scan::tokens(line);
-        let first = tokens.next();
-        let has_energy = first == Some(b"Energy");
-        let has_time = if has_energy {
-            tokens.next() == Some(b"Time")
-        } else {
-            first == Some(b"Time")
-        };
+    /// The columns of header row `line`; an error for a label before the
+    /// coordinates that is not one of these.
+    pub fn from_header_row(line: &[u8]) -> Result<Columns, String> {
+        // One leading column per label before the first coordinate; the
+        // `bin` of `Nuclide bin` and `Cell bin` is part of its label.
+        let mut leading = 0;
+        for t in scan::tokens(line).take_while(|t| !matches!(*t, b"X" | b"R")) {
+            match t {
+                b"Energy" | b"Time" | b"Nuclide" | b"Parent" | b"Cell" => leading += 1,
+                b"bin" if leading > 0 => {}
+                _ => {
+                    return Err(format!(
+                        "unknown column {:?} in the header row {:?}",
+                        String::from_utf8_lossy(t),
+                        String::from_utf8_lossy(line).trim()
+                    ))
+                }
+            }
+        }
+        if leading > 2 {
+            return Err(format!(
+                "more than two bin columns in the header row {:?}",
+                String::from_utf8_lossy(line).trim()
+            ));
+        }
         let has_volume = memchr::memmem::find(line, b"Volume").is_some();
-        let leading = usize::from(has_energy) + usize::from(has_time);
         let result_col = 3 + leading;
-        Columns {
+        Ok(Columns {
             result_col,
             expected_cols: result_col + 2 + 2 * usize::from(has_volume),
             vol_col: has_volume.then_some(result_col + 2),
-        }
+        })
     }
 
     pub fn has_volume(&self) -> bool {
@@ -147,6 +164,18 @@ pub(crate) fn parse_rows(
         }
         let at = first_line + n as u64 + 1;
         let text = || String::from_utf8_lossy(line).trim().to_string();
+        if n_tokens + 1 == cols.expected_cols {
+            // A negative value can run into the coordinate before it
+            // (`112.500-1.57688E-11`, when the coordinate fills its field).
+            if let Some((r, e, v)) = unglued(line, cols) {
+                out.result[k] = r;
+                out.rel_error[k] = e;
+                if let Some(slot) = out.volume.get_mut(k) {
+                    *slot = v.unwrap_or(f64::NAN);
+                }
+                continue;
+            }
+        }
         if n_tokens < cols.expected_cols {
             warnings.push(Warning::at(
                 at,
@@ -172,6 +201,48 @@ pub(crate) fn parse_rows(
         }
     }
     warnings
+}
+
+/// Result, Rel Error and Volume of a row one token short because a
+/// negative Result ran into the coordinate before it: the token where a
+/// sign follows a digit and starts a number with an exponent is split
+/// there. None when no token splits that way.
+fn unglued(line: &[u8], cols: &Columns) -> Option<(f64, f64, Option<f64>)> {
+    let mut tokens: Vec<&[u8]> = Vec::with_capacity(cols.expected_cols);
+    let mut split = false;
+    for tok in scan::tokens(line) {
+        let cut = (!split && tokens.len() < cols.result_col)
+            .then(|| glued_at(tok))
+            .flatten();
+        match cut {
+            Some(p) => {
+                tokens.push(&tok[..p]);
+                tokens.push(&tok[p..]);
+                split = true;
+            }
+            None => tokens.push(tok),
+        }
+    }
+    if !split || tokens.len() != cols.expected_cols {
+        return None;
+    }
+    let result = float::parse(tokens[cols.result_col])?;
+    let rel_error = float::parse(tokens[cols.result_col + 1])?;
+    let volume = cols.vol_col.and_then(|c| float::parse(tokens[c]));
+    Some((result, rel_error, volume))
+}
+
+/// Where `tok` splits into a fixed-point number and a number with an
+/// `E` exponent, `112.500-1.57688E-11` at its `-`.
+fn glued_at(tok: &[u8]) -> Option<usize> {
+    (1..tok.len()).find(|&p| {
+        matches!(tok[p], b'-' | b'+')
+            && tok[p - 1].is_ascii_digit()
+            && !tok[..p].iter().any(|c| matches!(c, b'E' | b'e'))
+            && tok[p..].iter().any(|c| matches!(c, b'E' | b'e'))
+            && float::parse(&tok[..p]).is_some()
+            && float::parse(&tok[p..]).is_some()
+    })
 }
 
 /// The warnings for a block of `seen` rows where `expected` were due.
@@ -348,10 +419,57 @@ mod tests {
     fn columns() {
         let c = Columns::from_header_row(
             b"  Energy   Time   X   Y   Z  Result  Rel Error  Volume  Rslt * Vol",
-        );
+        )
+        .unwrap();
         assert_eq!((c.result_col, c.expected_cols, c.vol_col), (5, 9, Some(7)));
         assert_eq!(c.out_format(), OutFormat::Cf);
-        let c = Columns::from_header_row(b"   Time   R   Z   Th  Result  Rel Error");
+        let c = Columns::from_header_row(b"   Time   R   Z   Th  Result  Rel Error").unwrap();
         assert_eq!((c.result_col, c.expected_cols, c.vol_col), (4, 6, None));
+        // D1SUNED discrete bins.
+        for (row, result_col) in [
+            (
+                &b"   Nuclide bin    X         Y         Z     Result     Rel Error"[..],
+                4,
+            ),
+            (
+                b"   Cell bin       X         Y         Z     Result     Rel Error",
+                4,
+            ),
+            (
+                b"   Energy      Nuclide         X    Y    Z     Result     Rel Error",
+                5,
+            ),
+            (
+                b"   Nuclide      Time         X    Y    Z     Result     Rel Error",
+                5,
+            ),
+        ] {
+            let c = Columns::from_header_row(row).unwrap();
+            assert_eq!(
+                (c.result_col, c.expected_cols),
+                (result_col, result_col + 2)
+            );
+        }
+        // Columns this reader doesn't know are refused, not guessed.
+        for row in [
+            &b"   Isotope   X   Y   Z  Result  Rel Error"[..],
+            b"   bin   X   Y   Z  Result  Rel Error",
+            b"   Energy   Time   Cell   X   Y   Z  Result  Rel Error",
+        ] {
+            assert!(Columns::from_header_row(row).is_err(), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn negative_value_run_into_its_coordinate() {
+        let mut rows = vec!["0.0 0.0 0.0 1.0 0.5".to_string(); 4];
+        rows[2] = "1.500   1.500    12.500-1.57688E-11 2.61718E+00".to_string();
+        let t = read(&file(2, 2, 1, &rows), 1 << 20);
+        assert!(t.warnings.is_empty(), "{:?}", t.warnings);
+        assert_eq!(t.result[[0, 0, 1, 0, 0]], -1.57688e-11);
+        assert_eq!(t.rel_error[[0, 0, 1, 0, 0]], 2.61718);
+        assert_eq!(glued_at(b"12.500-1.57688E-11"), Some(6));
+        assert_eq!(glued_at(b"1.57688E-11"), None);
+        assert_eq!(glued_at(b"1.5-104"), None);
     }
 }

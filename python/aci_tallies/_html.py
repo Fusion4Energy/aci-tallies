@@ -33,6 +33,8 @@ def _axis(axis: Axis, unit: str) -> str:
         return "—"
     b = axis.bounds
     span = f" ({b[0]:.3g} – {b[-1]:.3g} {unit})" if b is not None else ""
+    if axis.labels is not None:
+        span = f" ({axis.kind.replace('_', ' ')}s)"
     return f"{axis.n_bins}{' + Total' if axis.total else ''}{span}"
 
 

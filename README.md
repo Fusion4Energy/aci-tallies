@@ -82,6 +82,25 @@ scores exactly chord / volume). The input fixes the first two and the third:
 - **`*FMESH`** looks like `FMESH`; only the input says (`energy_weighted`).
 - Bounds around ±1e5–1e6 cm overflow MCNP's fixed-width fields: such a
   section is listed in `f.failed`.
+- MCNP5 prints no VEC for a cylinder: MCNP's default, `1 0 0` made
+  perpendicular to the axis, is assumed, with a warning (`input=` gives the
+  one the run used). MCNP 6.2 and 6.3 use that default when the card has no
+  VEC, and stop when the axis is along x (the two are parallel): such a
+  header's VEC is unknown (NaN) without the input.
+
+### D1SUNED meshtal sections
+
+D1SUNED's FMESH can score nuclides, parent nuclides or cells (`ETAG`/`TTAG`)
+and decay times in place of energy or time bins: their axis has `labels`
+(`26059.002` for Fe59, the 2nd bin; `0.001` is every other nuclide) instead
+of `bounds`, and a `kind` (`"nuclide"`, `"parent"`, `"cell"`,
+`"decay_time"`; decay times have no Total). A nuclide that overflows its
+10-character field (`**********`, as `41092900` does) is read from the
+FMESH card when `input=` is given; without it the section is in
+`f.failed`. D1SUNED 3.1.4's lone `Total Energy Bin` block is the one bin it
+is, and a negative value run into its coordinate (`112.500-1.57688E-11`) is
+split. Source-importance meshes (`GEOMETRY IMESH`, target tallies) are not
+read (they are in `f.failed`).
 
 ## MCTAL files
 
@@ -121,6 +140,36 @@ Found by running MCNP 6.2 and 6.3 on `tests/fixtures/mctal/*.mcnp`:
   and meshtal files alike: read exactly here (some other readers take them
   for 0).
 
+## CDGS files (D1SUNED)
+
+A Common Decay Gamma Source file holds decay gamma sources on meshes, as
+D1SUNED (and F4Enix) write them.
+
+```python
+from aci_tallies import cdgs
+
+f = cdgs.open("cdgs")                      # aci_tallies.open works too
+f.info(1).cooling_time, f.info(1).strength # s, photons/s
+src = f[1]                                 # MeshTally: source per voxel and energy bin
+src.result.shape                           # (energy, 1, i, j, k), Total energy bin last
+```
+
+- Read by parts like the other formats: opening indexes the file and reads
+  the headers; a read parses the mesh's voxels in parallel.
+- A voxel's source is the sum of its cells' (each cell's part of the voxel's
+  source, as D1SUNED writes them); voxels the file leaves out have none. The
+  Total bin is the sum of the bins, its error that of the sum; a voxel whose
+  printed source (or its cells' sum) differs from it by more than 1e-4 is
+  counted in a warning, as are voxels listed twice.
+- Energy bins (`energy_type bins`), or gamma lines (`lines`: an axis of
+  labels, `kind == "line"`). A bound too large for its field (`******`)
+  is NaN, with a warning.
+- Rectangular and cylindrical meshes. A cylinder's bounds and voxels are
+  printed r, theta, z: they are put in (r, z, theta) order. A rectangular
+  mesh placed by a `TR` card has its frame (origin, x and y axes) as
+  `geometry.transform`, with a warning: no file has confirmed that reading
+  yet.
+
 ## CuV files (D1SUNED)
 
 An FMESH with `out=cuv` (D1SUNED's cell-under-voxel mesh) is not written to
@@ -137,6 +186,7 @@ p.voxel, p.cell, p.fraction, p.flux        # flux: (pair, energy), per cm² and 
 f.read(14, voxels=slice(0, 10_000))        # only those voxels' part of the file
 both = cuv.open_mesh("cuvmsh", "meshinfo") # + material and density, pairs checked equal
 f.to_mesh(14)                              # MeshTally of voxel fluxes: to_vtk, isel, ...
+f.to_mesh(14, cells=[3, 4], norm="celf")   # only those cells, over the share they fill
 ```
 
 - Pairs come voxel by voxel in the mesh's flat order (`voxel`, as
@@ -147,7 +197,9 @@ f.to_mesh(14)                              # MeshTally of voxel fluxes: to_vtk, 
   cells, flux × volume share: what the same FMESH without `out=cuv` scores
   (to its 6 printed digits, `tests/fixtures/d1suned`). Its errors are
   combined as if the cells were independent: they aren't, and the estimate
-  ran 2–18% low there.
+  ran 2–18% low there. `cells=` keeps only those cells' pairs (a voxel
+  with none of them is 0); `norm="ctot"` multiplies by the voxel volume,
+  `norm="celf"` divides by the share of the voxel the cells kept fill.
 - The headers round the geometry like a meshtal header (and the energy
   bounds to 3 digits) and leave out `TR=`; `input=` gives the FMESH card's
   exact ones. D1SUNED's own keywords (`sppts`, `spmode`, ...) are known.

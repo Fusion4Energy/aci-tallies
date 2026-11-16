@@ -276,7 +276,13 @@ fn detects_formats() {
 /// every tally reads, with no NaN and no warning.
 #[test]
 fn other_real_files() {
-    let dir = std::path::Path::new(env!("HOME")).join("Coding/F4Enix/tests/resources/mctal");
+    // `F4ENIX_RESOURCES`: F4Enix's `tests/resources`.
+    let resources = std::env::var_os("F4ENIX_RESOURCES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("HOME")).join("Coding/F4Enix/tests/resources")
+        });
+    let dir = resources.join("mctal");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         eprintln!("skipped: {} not found", dir.display());
         return;

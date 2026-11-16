@@ -26,6 +26,39 @@ pub enum Bins {
     Upper(Vec<f64>),
     /// Only how many bins there are.
     Count(usize),
+    /// Discrete bins named by a number each, rather than bounded: the
+    /// nuclides, cells or decay times a D1SUNED mesh scores in place of
+    /// energy or time bins (`ETAG`/`TTAG`). A label is NaN when the file
+    /// overflowed its field (`**********`) and no input said what it was.
+    Labels { kind: LabelKind, values: Vec<f64> },
+}
+
+/// What the labels of a [`Bins::Labels`] axis are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelKind {
+    /// D1SUNED daughter nuclides, `ZZAAA.nnn` (`26059.002`: Fe59, the
+    /// 2nd bin; `0.001`, the first, is every other nuclide).
+    Nuclide,
+    /// D1SUNED parent nuclides, the same way.
+    Parent,
+    /// D1SUNED cells, `cell.nnn`.
+    Cell,
+    /// D1SUNED decay (cooling) times, in seconds; they have no Total.
+    DecayTime,
+    /// Gamma lines (MeV) of a CDGS source.
+    Line,
+}
+
+impl LabelKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            LabelKind::Nuclide => "nuclide",
+            LabelKind::Parent => "parent",
+            LabelKind::Cell => "cell",
+            LabelKind::DecayTime => "decay_time",
+            LabelKind::Line => "line",
+        }
+    }
 }
 
 impl Axis {
@@ -45,12 +78,30 @@ impl Axis {
         Axis::bounded(bounds, total)
     }
 
+    /// Discrete bins `values` of `kind`, with a Total bin when D1SUNED
+    /// prints one: when there is more than one bin, other than for decay
+    /// times.
+    pub fn labelled(kind: LabelKind, values: Vec<f64>) -> Axis {
+        let total = values.len() > 1 && kind != LabelKind::DecayTime;
+        Axis::labelled_with_total(kind, values, total)
+    }
+
+    /// Discrete bins `values` of `kind`, and whether a Total follows.
+    pub fn labelled_with_total(kind: LabelKind, values: Vec<f64>, total: bool) -> Axis {
+        Axis {
+            bins: Bins::Labels { kind, values },
+            total,
+            cumulative: false,
+        }
+    }
+
     /// Number of bins, the Total one excluded.
     pub fn n_bins(&self) -> usize {
         match &self.bins {
             Bins::Bounds(b) => b.len().saturating_sub(1),
             Bins::Upper(b) => b.len(),
             Bins::Count(n) => *n,
+            Bins::Labels { values, .. } => values.len(),
         }
     }
 
@@ -80,7 +131,23 @@ impl Axis {
         match &self.bins {
             Bins::Bounds(b) => b.get(1..),
             Bins::Upper(b) => Some(b),
-            Bins::Count(_) => None,
+            Bins::Count(_) | Bins::Labels { .. } => None,
+        }
+    }
+
+    /// The label of each bin, for discrete bins ([`Bins::Labels`]).
+    pub fn labels(&self) -> Option<&[f64]> {
+        match &self.bins {
+            Bins::Labels { values, .. } => Some(values),
+            _ => None,
+        }
+    }
+
+    /// What the labels are, for discrete bins.
+    pub fn label_kind(&self) -> Option<LabelKind> {
+        match &self.bins {
+            Bins::Labels { kind, .. } => Some(*kind),
+            _ => None,
         }
     }
 
@@ -105,6 +172,10 @@ impl Axis {
             Bins::Bounds(b) => Bins::Bounds(b[range.start..=range.end].to_vec()),
             Bins::Upper(b) => Bins::Upper(b[range.clone()].to_vec()),
             Bins::Count(_) => Bins::Count(range.len()),
+            Bins::Labels { kind, values } => Bins::Labels {
+                kind: *kind,
+                values: values[range.clone()].to_vec(),
+            },
         };
         Axis {
             bins,
@@ -121,6 +192,16 @@ impl Axis {
                 (Bins::Bounds(a), Bins::Bounds(b)) | (Bins::Upper(a), Bins::Upper(b)) => {
                     close(a, b, tol)
                 }
+                (
+                    Bins::Labels {
+                        kind: ka,
+                        values: a,
+                    },
+                    Bins::Labels {
+                        kind: kb,
+                        values: b,
+                    },
+                ) => ka == kb && close(a, b, tol),
                 (a, b) => a == b,
             }
     }

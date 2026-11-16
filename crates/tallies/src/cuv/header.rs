@@ -30,6 +30,7 @@
 //! together, and voxel volumes 2π too large; it is told by a last theta
 //! bound above 1, and both are corrected. 4.x writes revolutions.
 
+use crate::common::float::fixed_floats;
 use crate::common::Warning;
 use crate::meshtal::header::SectionHeader;
 use crate::meshtal::Geometry;
@@ -223,28 +224,14 @@ pub(crate) fn parse(kind: FileKind, lines: &[&str]) -> Result<CuvHeader, Option<
             geometry,
             energy_bounds,
             time_bounds: vec![0.0, 1e36],
+            energy_labels: None,
+            time_labels: None,
+            vec_printed: true,
         },
         legacy_cylindrical,
         lines: lines_before_data,
         warnings,
     })
-}
-
-/// Floats in fixed-width fields of `width` characters (Fortran `fw.d`), so
-/// that values running into each other still split; whitespace-separated
-/// when the text is not a whole number of fields.
-pub(crate) fn fixed_floats(s: &str, width: usize) -> Option<Vec<f64>> {
-    let s = s.trim_end();
-    let bytes = s.as_bytes();
-    let v: Option<Vec<f64>> = if bytes.len().is_multiple_of(width) {
-        bytes
-            .chunks(width)
-            .map(|c| std::str::from_utf8(c).ok()?.trim().parse().ok())
-            .collect()
-    } else {
-        s.split_whitespace().map(|w| w.parse().ok()).collect()
-    };
-    v.filter(|v| !v.is_empty())
 }
 
 type Frame = ([f64; 3], [f64; 3], [f64; 3]);
@@ -268,27 +255,6 @@ fn parse_origin_line(line: &str) -> Option<Frame> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fixed_width_splits_merged_values() {
-        assert_eq!(
-            fixed_floats("0.000000002.50000000", 10),
-            Some(vec![0.0, 2.5])
-        );
-        assert_eq!(
-            fixed_floats("   0.00000   1.00000", 10),
-            Some(vec![0.0, 1.0])
-        );
-        assert_eq!(
-            fixed_floats("  -1000.00-999999.99", 10),
-            Some(vec![-1000.0, -999999.99])
-        );
-        assert_eq!(
-            fixed_floats("     0.000     1.000   ", 10),
-            Some(vec![0.0, 1.0])
-        );
-        assert_eq!(fixed_floats("  ", 10), None);
-    }
 
     #[test]
     fn origin_line() {
