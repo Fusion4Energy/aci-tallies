@@ -20,7 +20,7 @@ classifiers = [
 dependencies = ["numpy>=1.24"]
 
 [project.urls]
-Repository = "https://github.com/AlvaroCubi/aci-tallies"
+Repository = "https://github.com/Fusion4Energy/aci-tallies"
 
 [project.optional-dependencies]
 polars = ["polars>=1.0"]

@@ -22,7 +22,7 @@ The MCNP input is optional; it gives what the output files leave out (exact
 mesh bounds, `TR=` transformations, ...).
 
 Also available from Python as [`aci-tallies`](https://pypi.org/project/aci-tallies/)
-on PyPI. See the [repository](https://github.com/AlvaroCubi/aci-tallies) for
+on PyPI. See the [repository](https://github.com/Fusion4Energy/aci-tallies) for
 details.
 
 License: EUPL-1.2.
