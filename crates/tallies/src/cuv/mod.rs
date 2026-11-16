@@ -46,7 +46,7 @@ use std::sync::Arc;
 
 use ndarray::Array2;
 
-pub use join::CuvMesh;
+pub use join::{CuvMesh, VoxelNorm};
 pub use model::{CuvInfo, CuvPart, Decomposition, Pairs, Spectra};
 
 use self::header::FileKind;
@@ -213,8 +213,19 @@ impl Cuvmsh {
     /// cells of their flux times their share of its volume (see
     /// [`Spectra::voxel_flux`]).
     pub fn to_mesh(&self, id: u32) -> Result<Tally, ReadError> {
+        self.to_mesh_with(id, None, VoxelNorm::Average)
+    }
+
+    /// [`Cuvmsh::to_mesh`] over only the cells `cells` (all when None),
+    /// scaled by `norm` (see [`Spectra::voxel_flux_with`]).
+    pub fn to_mesh_with(
+        &self,
+        id: u32,
+        cells: Option<&[u32]>,
+        norm: VoxelNorm,
+    ) -> Result<Tally, ReadError> {
         let info = self.0.tally(id)?.clone();
-        Ok(self.read(id)?.voxel_flux(&info))
+        Ok(self.read(id)?.voxel_flux_with(&info, cells, norm))
     }
 }
 

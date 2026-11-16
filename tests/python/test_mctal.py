@@ -2,6 +2,7 @@
 for the exact values)."""
 
 import logging
+import os
 from pathlib import Path
 
 import aci_tallies
@@ -25,6 +26,7 @@ def test_file(probe: mctal.MctalFile) -> None:
     assert probe.histories == 100 and probe.dump == 2 and probe.perturbations == 0
     assert probe.code == ("mcnp", "6.mpi")
     assert probe.kcode is None and probe.failed == [] and probe.warnings == []
+    assert probe.declared_ids == probe.ids
     info = probe.info(64)
     assert info.shape == [4, 1, 1, 1, 1, 1, 4, 3]
     assert info.dims == ["f", "d", "u", "s", "m", "c", "e", "t"]
@@ -115,9 +117,39 @@ def test_kcode_and_perturbations() -> None:
         f.read(4, perturbation=3)
     assert f.info(5).detector == "point" and f.info(15).detector == "ring"
     assert f.info(14).modifier == "*" and f.info(6).modifier == "+"
+    # The tally lines' own numbers.
+    assert f.info(5).detector_code == 1 and f.info(15).detector_code == 2
+    assert f.info(4).detector_code == 0
 
 
-F4ENIX = Path.home() / "Coding/F4Enix/tests/resources/mctal"
+def test_raw_header(probe: mctal.MctalFile) -> None:
+    for id in probe.ids:
+        info = probe.info(id)
+        assert info.particle_code != 0
+        if info.particle_code < 0:
+            flags = info.particle_flags
+            assert isinstance(flags, list) and set(flags) <= {0, 1}
+            assert sum(flags) == -info.particle_code
+            assert len(info.particles) == -info.particle_code
+        else:
+            assert info.particle_flags is None
+        counts = info.bin_counts
+        assert len(counts) == 8
+        for n, axis in zip(counts[1:], list(info.axes.values())[1:]):
+            assert len(axis) == max(n, 1)
+        if info.comment is None:
+            assert info.comment_lines == []
+        else:
+            joined = " ".join(info.comment_lines)
+            assert joined.split() == info.comment.split()
+
+
+# F4Enix's test files: `F4ENIX_RESOURCES` (its `tests/resources`), else
+# where they were first found.
+F4ENIX_RESOURCES = Path(
+    os.environ.get("F4ENIX_RESOURCES", Path.home() / "Coding/F4Enix/tests/resources")
+)
+F4ENIX = F4ENIX_RESOURCES / "mctal"
 
 
 @pytest.mark.skipif(not F4ENIX.is_dir(), reason="F4Enix's test files are not here")
@@ -135,8 +167,11 @@ def test_same_values_as_f4enix() -> None:
             t = ours[ref.tallyNumber]
             if t.mesh is not None:
                 continue
-            vals = ref.valsErrors[..., 0].reshape(tuple(t.shape))
-            errs = ref.valsErrors[..., 1].reshape(tuple(t.shape))
+            # `valsErrors` before F4Enix 1.3, `values` since.
+            raw = getattr(ref, "values", None)
+            raw = ref.valsErrors if raw is None else raw
+            vals = raw[..., 0].reshape(tuple(t.shape))
+            errs = raw[..., 1].reshape(tuple(t.shape))
             tiny = np.abs(t.result) < 1e-99
             assert np.array_equal(vals[~tiny], t.result[~tiny]), (
                 path.name,

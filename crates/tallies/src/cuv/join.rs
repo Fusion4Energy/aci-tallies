@@ -126,6 +126,31 @@ fn same_pairs(m: &Pairs, c: &Pairs) -> Result<(), String> {
     Ok(())
 }
 
+/// How [`Spectra::voxel_flux_with`] scales each voxel's flux.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VoxelNorm {
+    /// The flux averaged over the voxel: Σ fraction·flux over its cells.
+    #[default]
+    Average,
+    /// Times the voxel's volume: the voxel's total (F4Enix's `ctot`).
+    Total,
+    /// Over the sum of the fractions of the cells kept: the average over
+    /// the part of the voxel they fill (F4Enix's `celf`).
+    CellFraction,
+}
+
+impl VoxelNorm {
+    /// From F4Enix's names: `ctot`, `celf`, or none.
+    pub fn from_name(name: Option<&str>) -> Option<VoxelNorm> {
+        match name {
+            None => Some(VoxelNorm::Average),
+            Some("ctot") => Some(VoxelNorm::Total),
+            Some("celf") => Some(VoxelNorm::CellFraction),
+            Some(_) => None,
+        }
+    }
+}
+
 impl Spectra {
     /// The flux of each voxel read, as a meshtal tally of mesh `info`: the
     /// sum over its cells of their flux times their share of its volume,
@@ -137,6 +162,12 @@ impl Spectra {
     /// are not (the same histories cross several cells of a voxel), so the
     /// voxel's error is only an estimate, usually low.
     pub fn voxel_flux(&self, info: &CuvInfo) -> Tally {
+        self.voxel_flux_with(info, None, VoxelNorm::Average)
+    }
+
+    /// [`Spectra::voxel_flux`] over only the pairs of `cells` (all when
+    /// None), scaled by `norm`. A voxel none of whose cells is kept is 0.
+    pub fn voxel_flux_with(&self, info: &CuvInfo, cells: Option<&[u32]>, norm: VoxelNorm) -> Tally {
         let geometry = &info.geometry;
         let (ni, nj, nk) = geometry.dims();
         let voxels = ni * nj * nk;
@@ -156,9 +187,14 @@ impl Spectra {
                 var[e * voxels + v] = 0.0;
             }
         }
+        let mut kept_fraction = vec![0.0; voxels];
         for p in 0..self.pairs.len() {
+            if cells.is_some_and(|c| !c.contains(&self.pairs.cell[p])) {
+                continue;
+            }
             let v = self.pairs.voxel[p] as usize;
             let f = self.pairs.fraction[p];
+            kept_fraction[v] += f;
             let mut add = |e: usize, flux: f64, rel: f64| {
                 let x = f * flux;
                 value[e * voxels + v] += x;
@@ -169,6 +205,22 @@ impl Spectra {
             }
             if ne > n {
                 add(n, self.total[p], self.total_error[p]);
+            }
+        }
+        let mut volume = vec![f64::NAN; voxels];
+        for (k, v) in self.pairs.voxels.clone().enumerate() {
+            volume[v] = self.pairs.voxel_volume[k];
+        }
+        for v in self.pairs.voxels.clone() {
+            let scale = match norm {
+                VoxelNorm::Average => 1.0,
+                VoxelNorm::Total => volume[v],
+                VoxelNorm::CellFraction if kept_fraction[v] > 0.0 => 1.0 / kept_fraction[v],
+                VoxelNorm::CellFraction => 1.0,
+            };
+            for e in 0..ne {
+                value[e * voxels + v] *= scale;
+                var[e * voxels + v] *= scale * scale;
             }
         }
         let rel: Vec<f64> = value
@@ -184,10 +236,6 @@ impl Spectra {
                 }
             })
             .collect();
-        let mut volume = vec![f64::NAN; voxels];
-        for (k, v) in self.pairs.voxels.clone().enumerate() {
-            volume[v] = self.pairs.voxel_volume[k];
-        }
         let shape = (ne, 1, ni, nj, nk);
         let tally_info = TallyInfo {
             id: info.id,

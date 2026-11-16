@@ -213,12 +213,31 @@ pub(crate) fn index_blocks(
     let has_time = markers
         .iter()
         .any(|m| matches!(m.marker, Marker::Time { .. }));
-    let energy_total = markers
-        .iter()
-        .any(|m| m.marker == Marker::Energy { total: true });
-    let time_total = markers
-        .iter()
-        .any(|m| m.marker == Marker::Time { total: true });
+    // D1SUNED 3.1.4 calls the block of a lone energy (or time) bin its
+    // Total: that is the bin itself, not one more.
+    let lone_total = |total: Marker, plain: Marker, n: usize| {
+        n == 1
+            && markers.iter().any(|m| m.marker == total)
+            && !markers.iter().any(|m| m.marker == plain)
+    };
+    let energy_lone = lone_total(
+        Marker::Energy { total: true },
+        Marker::Energy { total: false },
+        n_energy,
+    );
+    let time_lone = lone_total(
+        Marker::Time { total: true },
+        Marker::Time { total: false },
+        n_time,
+    );
+    let energy_total = !energy_lone
+        && markers
+            .iter()
+            .any(|m| m.marker == Marker::Energy { total: true });
+    let time_total = !time_lone
+        && markers
+            .iter()
+            .any(|m| m.marker == Marker::Time { total: true });
     let n_e_slots = n_energy + usize::from(energy_total);
     let n_t_slots = n_time + usize::from(time_total);
 
@@ -240,7 +259,11 @@ pub(crate) fn index_blocks(
     for (n, m) in markers.iter().enumerate() {
         match m.marker {
             Marker::Energy { total } => {
-                energy = Some(if total { n_energy } else { next_e });
+                energy = Some(if total && !energy_lone {
+                    n_energy
+                } else {
+                    next_e
+                });
                 next_e += usize::from(!total);
                 if has_time {
                     time = None;
@@ -249,7 +272,7 @@ pub(crate) fn index_blocks(
                 outer = 0;
             }
             Marker::Time { total } => {
-                time = Some(if total { n_time } else { next_t });
+                time = Some(if total && !time_lone { n_time } else { next_t });
                 next_t += usize::from(!total);
                 outer = 0;
             }

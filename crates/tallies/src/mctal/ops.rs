@@ -40,6 +40,7 @@ fn with_values(a: &Tally, result: ArrayD<f64>, rel_error: ArrayD<f64>) -> Tally 
         numbers: a.numbers.clone(),
         bins: a.bins.clone(),
         mesh: a.mesh.clone(),
+        raw: a.raw.clone(),
         perturbation: a.perturbation,
         result,
         rel_error,

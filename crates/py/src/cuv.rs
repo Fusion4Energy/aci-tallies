@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use aci_tallies::common::Input;
-use aci_tallies::cuv::{CuvInfo, CuvMesh, Cuvmsh, Meshinfo, Pairs, Spectra};
+use aci_tallies::cuv::{CuvInfo, CuvMesh, Cuvmsh, Meshinfo, Pairs, Spectra, VoxelNorm};
 use aci_tallies::meshtal::FileHeader;
 use aci_tallies::ReadError;
 use numpy::{IntoPyArray, PyArray1, PyArray2};
@@ -307,7 +307,20 @@ impl PyCuvFile {
     /// the sum of its cells' fluxes times their shares of its volume, what
     /// an FMESH without `out=cuv` scores. Errors are combined as if the
     /// cells were independent (they aren't): an estimate, usually low.
-    fn to_mesh(&self, py: Python<'_>, id: u32) -> PyResult<PyMeshTally> {
+    #[pyo3(signature = (id, cells=None, norm=None))]
+    fn to_mesh(
+        &self,
+        py: Python<'_>,
+        id: u32,
+        cells: Option<Vec<u32>>,
+        norm: Option<&str>,
+    ) -> PyResult<PyMeshTally> {
+        let norm = VoxelNorm::from_name(norm).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "norm must be None, \"ctot\" or \"celf\", not {:?}",
+                norm.unwrap_or_default()
+            ))
+        })?;
         let files = &self.files;
         let tally = py
             .allow_threads(|| -> Result<_, ReadError> {
@@ -316,7 +329,7 @@ impl PyCuvFile {
                     Files::Both(b) => &b.cuvmsh,
                     Files::Meshinfo(_) => return Ok(None),
                 };
-                cuvmsh.to_mesh(id).map(Some)
+                cuvmsh.to_mesh_with(id, cells.as_deref(), norm).map(Some)
             })
             .map_err(read_error)?
             .ok_or_else(|| PyValueError::new_err("to_mesh needs the cuvmsh (spectra)"))?;

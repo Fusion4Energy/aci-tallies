@@ -27,8 +27,8 @@ mod reader;
 mod vals;
 
 pub use model::{
-    BinRef, Detector, FileHeader, Kcode, MeshGrid, Modifier, Number, Tally, TallyBin, TallyInfo,
-    Tfc, C, D, DIMS, E, F, M, PARTICLES, S, T, U,
+    BinRef, Detector, FileHeader, Kcode, MeshGrid, Modifier, Number, RawHeader, Tally, TallyBin,
+    TallyInfo, Tfc, C, D, DIMS, E, F, M, PARTICLES, S, T, U,
 };
 pub use ops::{OpsError, Select};
 pub use reader::{is_mctal, Reader};

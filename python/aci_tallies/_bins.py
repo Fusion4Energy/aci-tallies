@@ -34,6 +34,17 @@ def axis_columns(axis: Axis) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 _FIRST_LOWER = {"e": 0.0, "c": -1.0, "t": -np.inf}
 
 
+def axis_labels(axis: Axis) -> np.ndarray | None:
+    """Per index of a discrete `axis` (D1SUNED nuclides, cells, decay
+    times): its label, NaN for the Total; None for a bounded axis."""
+    labels = axis.labels
+    if labels is None:
+        return None
+    out = np.full(len(axis), np.nan)
+    out[: axis.n_bins] = labels
+    return out
+
+
 def mctal_axis_columns(
     name: str, axis: Axis
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:

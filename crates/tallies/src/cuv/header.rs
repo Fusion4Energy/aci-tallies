@@ -223,6 +223,8 @@ pub(crate) fn parse(kind: FileKind, lines: &[&str]) -> Result<CuvHeader, Option<
             geometry,
             energy_bounds,
             time_bounds: vec![0.0, 1e36],
+            energy_labels: None,
+            time_labels: None,
         },
         legacy_cylindrical,
         lines: lines_before_data,

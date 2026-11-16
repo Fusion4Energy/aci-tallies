@@ -13,7 +13,7 @@ pub mod cuv;
 pub mod mctal;
 pub mod meshtal;
 
-pub use common::{Axis, Bins, ReadError, Warning};
+pub use common::{Axis, Bins, LabelKind, ReadError, Warning};
 
 /// The formats this crate reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

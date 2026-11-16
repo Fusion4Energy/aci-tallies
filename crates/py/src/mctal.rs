@@ -95,6 +95,13 @@ impl PyMctalFile {
         &self.reader.header().probid
     }
 
+    /// The tally numbers the header lists (its `ntal` list), in order: more
+    /// than `ids` when the file is cut short.
+    #[getter]
+    fn declared_ids(&self) -> Vec<u32> {
+        self.reader.header().tallies.clone()
+    }
+
     /// The dump the tallies are from.
     #[getter]
     fn dump(&self) -> u64 {
@@ -294,6 +301,43 @@ macro_rules! tally_getters {
             #[getter]
             fn comment(&self) -> Option<&str> {
                 self.$t.comment.as_deref()
+            }
+
+            /// The comment's lines as written, without their first 5
+            /// columns and trailing blanks (`comment` joins them).
+            #[getter]
+            fn comment_lines(&self) -> Vec<String> {
+                self.$t.raw.comment_lines.clone()
+            }
+
+            /// The `tally` line's particle number: MCNP5's bit code
+            /// (1 n, 2 p, 4 e), or minus the number of particles flagged.
+            #[getter]
+            fn particle_code(&self) -> i64 {
+                self.$t.raw.particle_code
+            }
+
+            /// The 0/1 particle flags (MCNP 6 order), when
+            /// `particle_code` is negative; else None.
+            #[getter]
+            fn particle_flags(&self) -> Option<Vec<u32>> {
+                let flags = &self.$t.raw.particle_flags;
+                (!flags.is_empty()).then(|| flags.iter().map(|&f| u32::from(f)).collect())
+            }
+
+            /// The number on each bin line (`f d u s m c e t`) as written:
+            /// a Total bin counted, 0 for an unused dimension.
+            #[getter]
+            fn bin_counts(&self) -> Vec<u64> {
+                self.$t.raw.bin_counts.clone()
+            }
+
+            /// The `tally` line's detector number: 0 none, 1 point,
+            /// 2 ring, 3-5 radiography images, negative for a `TMESH`
+            /// mesh tally.
+            #[getter]
+            fn detector_code(&self) -> i64 {
+                self.$t.raw.detector_code
             }
 
             /// The names of the eight axes, in order: `f d u s m c e t`.

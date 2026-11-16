@@ -1,4 +1,4 @@
-use crate::common::scan;
+use crate::common::{scan, Axis, LabelKind};
 use crate::meshtal::model::Geometry;
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -13,6 +13,65 @@ pub(crate) enum HeaderError {
     BadBinBoundaries(String),
     #[error("could not parse origin/axis/vec from line: {0:?}")]
     BadCylindricalOrigin(String),
+    #[error("more than two energy/time bin lines: {0:?}")]
+    TooManyBinLines(String),
+}
+
+/// The discrete bins a D1SUNED mesh prints in place of energy or time
+/// bounds (`Daughter Nuclides list:`, `Decay times:`, ...). A label is
+/// None where the file overflowed its field (`**********`); `overflowed`
+/// says that happened, after which even how many labels there are is
+/// unknown.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HeaderLabels {
+    pub kind: LabelKind,
+    pub values: Vec<f64>,
+    pub overflowed: bool,
+}
+
+impl HeaderLabels {
+    fn parse(kind: LabelKind, line: &str) -> Option<HeaderLabels> {
+        let after = line.split_once(':')?.1;
+        // D1SUNED writes each label in 10 columns, so an overflowed one
+        // runs into its neighbours: take what reads before the first `*`.
+        let (good, overflowed) = match after.find('*') {
+            Some(p) => (&after[..p], true),
+            None => (after, false),
+        };
+        let mut values = Vec::new();
+        for tok in good.split_whitespace() {
+            match tok.parse::<f64>() {
+                Ok(v) => values.push(v),
+                // A token cut by the first `*`.
+                Err(_) if overflowed => break,
+                Err(_) => return None,
+            }
+        }
+        if values.is_empty() && !overflowed {
+            return None;
+        }
+        Some(HeaderLabels {
+            kind,
+            values,
+            overflowed,
+        })
+    }
+
+    /// The label line's kind, from its text.
+    fn kind_of(line: &str) -> Option<LabelKind> {
+        let t = line.trim_start();
+        if t.starts_with("Daughter Nuclides list:") {
+            Some(LabelKind::Nuclide)
+        } else if t.starts_with("Parent Nuclides list:") {
+            Some(LabelKind::Parent)
+        } else if t.starts_with("Cells list:") {
+            Some(LabelKind::Cell)
+        } else if t.starts_with("Decay times:") {
+            Some(LabelKind::DecayTime)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -23,19 +82,58 @@ pub(crate) struct SectionHeader {
     pub geometry: Geometry,
     pub energy_bounds: Vec<f64>,
     pub time_bounds: Vec<f64>,
+    /// D1SUNED discrete bins in place of the energy bounds (which are then
+    /// left at their default, one bin).
+    pub energy_labels: Option<HeaderLabels>,
+    /// The same, in place of the time bounds.
+    pub time_labels: Option<HeaderLabels>,
 }
 
 impl SectionHeader {
     /// Number of real energy groups implied by `energy_bounds`. A tally
     /// with no `EMESH` card still has one implicit group.
     pub(crate) fn n_energy_from_bounds(&self) -> usize {
-        self.energy_bounds.len().saturating_sub(1).max(1)
+        match &self.energy_labels {
+            Some(l) => l.values.len().max(1),
+            None => self.energy_bounds.len().saturating_sub(1).max(1),
+        }
     }
 
     /// Number of real time bins implied by `time_bounds`. A tally with no
     /// `TMESH` card still has one implicit bin.
     pub(crate) fn n_time_from_bounds(&self) -> usize {
-        self.time_bounds.len().saturating_sub(1).max(1)
+        match &self.time_labels {
+            Some(l) => l.values.len().max(1),
+            None => self.time_bounds.len().saturating_sub(1).max(1),
+        }
+    }
+
+    /// The labels, if any, that overflowed and are still unknown.
+    pub(crate) fn overflowed_labels(&self) -> Option<&HeaderLabels> {
+        [&self.energy_labels, &self.time_labels]
+            .into_iter()
+            .flatten()
+            .find(|l| l.overflowed)
+    }
+
+    /// The energy axis, with MCNP's Total bin when there is more than one
+    /// bin (`None`: decide from the data, as a matrix layout does).
+    pub(crate) fn energy_axis(&self, total: Option<bool>) -> Axis {
+        axis_of(&self.energy_bounds, self.energy_labels.as_ref(), total)
+    }
+
+    /// The time axis, the same way.
+    pub(crate) fn time_axis(&self, total: Option<bool>) -> Axis {
+        axis_of(&self.time_bounds, self.time_labels.as_ref(), total)
+    }
+}
+
+fn axis_of(bounds: &[f64], labels: Option<&HeaderLabels>, total: Option<bool>) -> Axis {
+    match (labels, total) {
+        (Some(l), None) => Axis::labelled(l.kind, l.values.clone()),
+        (Some(l), Some(t)) => Axis::labelled_with_total(l.kind, l.values.clone(), t),
+        (None, None) => Axis::mcnp(bounds.to_vec()),
+        (None, Some(t)) => Axis::bounded(bounds.to_vec(), t),
     }
 }
 
@@ -101,24 +199,57 @@ pub(crate) fn parse_header(lines: &[&str]) -> Result<(SectionHeader, usize), Hea
 
     // The `Time bin boundaries:` line, when present (only when a `TMESH`
     // card was used), always precedes `Energy bin boundaries:` — confirmed
-    // against `examples/meshtal` tallies 84/94. Detected by label text, not
-    // position, since it's optional and its absence must not shift the
-    // (mandatory) energy line's detection.
-    let mut time_bounds = vec![0.0, 1e36];
-    if get(lines, i)?.contains("Time bin boundaries:") {
-        let time_line = lines[i];
-        time_bounds = parse_floats_after_colon(time_line)
-            .ok_or_else(|| HeaderError::BadBinBoundaries(time_line.to_string()))?;
+    // against `examples/meshtal` tallies 84/94. D1SUNED prints discrete
+    // bins (`ETAG`/`TTAG`: nuclides, cells, decay times) in place of
+    // either, in the same order: of two bin lines the first is time, the
+    // second energy; a lone one is energy.
+    let mut bin_lines: Vec<(BinLine, &str)> = Vec::new();
+    loop {
+        let line = get(lines, i)?;
+        let kind = if line.contains("Time bin boundaries:") {
+            BinLine::TimeBounds
+        } else if line.contains("Energy bin boundaries:") {
+            BinLine::EnergyBounds
+        } else if let Some(k) = HeaderLabels::kind_of(line) {
+            BinLine::Labels(k)
+        } else {
+            break;
+        };
+        bin_lines.push((kind, line));
         i += 1;
+        if kind == BinLine::EnergyBounds {
+            break;
+        }
     }
-
-    let energy_line = get(lines, i)?;
-    if !energy_line.contains("Energy bin boundaries:") {
-        return Err(HeaderError::BadBinBoundaries(energy_line.to_string()));
+    let (time_line, energy_line) = match bin_lines.as_slice() {
+        [] => return Err(HeaderError::BadBinBoundaries(get(lines, i)?.to_string())),
+        [e] => (None, *e),
+        [t, e] => (Some(*t), *e),
+        [.., last] => return Err(HeaderError::TooManyBinLines(last.1.to_string())),
+    };
+    let bad = |line: &str| HeaderError::BadBinBoundaries(line.to_string());
+    let (mut time_bounds, mut time_labels) = (vec![0.0, 1e36], None);
+    if let Some((kind, line)) = time_line {
+        match kind {
+            BinLine::TimeBounds => {
+                time_bounds = parse_floats_after_colon(line).ok_or_else(|| bad(line))?
+            }
+            BinLine::Labels(k) => {
+                time_labels = Some(HeaderLabels::parse(k, line).ok_or_else(|| bad(line))?)
+            }
+            BinLine::EnergyBounds => return Err(bad(line)),
+        }
     }
-    let energy_bounds = parse_floats_after_colon(energy_line)
-        .ok_or_else(|| HeaderError::BadBinBoundaries(energy_line.to_string()))?;
-    i += 1;
+    let (mut energy_bounds, mut energy_labels) = (vec![0.0, 1e36], None);
+    match energy_line {
+        (BinLine::EnergyBounds, line) => {
+            energy_bounds = parse_floats_after_colon(line).ok_or_else(|| bad(line))?
+        }
+        (BinLine::Labels(k), line) => {
+            energy_labels = Some(HeaderLabels::parse(k, line).ok_or_else(|| bad(line))?)
+        }
+        (BinLine::TimeBounds, line) => return Err(bad(line)),
+    }
 
     i = skip_blank(lines, i);
 
@@ -129,8 +260,18 @@ pub(crate) fn parse_header(lines: &[&str]) -> Result<(SectionHeader, usize), Hea
         geometry,
         energy_bounds,
         time_bounds,
+        energy_labels,
+        time_labels,
     };
     Ok((header, i))
+}
+
+/// A line of bins after the mesh bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BinLine {
+    TimeBounds,
+    EnergyBounds,
+    Labels(LabelKind),
 }
 
 fn get<'a>(lines: &[&'a str], i: usize) -> Result<&'a str, HeaderError> {

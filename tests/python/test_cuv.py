@@ -23,6 +23,35 @@ def test_open_tells_the_files_apart():
         cuv.open(str(D1S / "meshtal"))
 
 
+def test_mesh_of_some_cells_scaled():
+    f = cuv.open(CUVMSH)
+    p = f[14]
+    whole = f.to_mesh(14)
+    np.testing.assert_allclose(f.to_mesh(14, norm=None).result, whole.result)
+    # Times each voxel's volume.
+    ctot = f.to_mesh(14, norm="ctot")
+    np.testing.assert_allclose(ctot.result, whole.result * whole.volume, rtol=1e-12)
+    np.testing.assert_allclose(ctot.rel_error, whole.rel_error, rtol=1e-12)
+    # Only some cells: the sum of their pairs alone.
+    cell = int(p.cell[0])
+    some = f.to_mesh(14, cells=[cell])
+    keep = p.cell == cell
+    nv = len(p.voxel_volume)
+    expected = np.zeros(nv)
+    np.add.at(expected, p.voxel[keep], p.fraction[keep] * p.total[keep])
+    flat = some.result[-1, 0].reshape(-1)
+    np.testing.assert_allclose(flat, expected, rtol=1e-12)
+    # celf: over the share of the voxel those cells fill.
+    share = np.zeros(nv)
+    np.add.at(share, p.voxel[keep], p.fraction[keep])
+    celf = f.to_mesh(14, cells=[cell], norm="celf").result[-1, 0].reshape(-1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        want = np.where(share > 0, expected / share, 0.0)
+    np.testing.assert_allclose(celf, want, rtol=1e-12)
+    with pytest.raises(ValueError):
+        f.to_mesh(14, norm="volume")
+
+
 def test_pairs_are_read_only_arrays():
     f = cuv.open(CUVMSH)
     p = f[14]

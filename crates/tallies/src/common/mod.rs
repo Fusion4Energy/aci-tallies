@@ -9,7 +9,7 @@ pub mod source;
 pub(crate) mod values;
 pub mod warning;
 
-pub use axis::{Axis, Bins};
+pub use axis::{Axis, Bins, LabelKind};
 pub use input::Input;
 pub use select::{OpsError, Select};
 pub use source::{ReadError, Source};

@@ -99,6 +99,26 @@ impl PyAxis {
         self.axis.upper().map(|b| PyArray1::from_slice(py, b))
     }
 
+    /// The label of each bin, for the discrete bins D1SUNED prints in
+    /// place of energy or time bins (nuclides `26059.002`, cells, decay
+    /// times); None for bounded bins.
+    #[getter]
+    fn labels<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.axis.labels().map(|b| PyArray1::from_slice(py, b))
+    }
+
+    /// What the bins are: `"bounds"`, `"upper"` or `"count"`, or for
+    /// discrete bins `"nuclide"`, `"parent"`, `"cell"` or `"decay_time"`.
+    #[getter]
+    fn kind(&self) -> &'static str {
+        match &self.axis.bins {
+            Bins::Bounds(_) => "bounds",
+            Bins::Upper(_) => "upper",
+            Bins::Count(_) => "count",
+            Bins::Labels { kind, .. } => kind.name(),
+        }
+    }
+
     /// Whether each bin holds everything up to its upper bound (MCNP's `C`
     /// option) rather than only what falls within it.
     #[getter]
@@ -152,6 +172,17 @@ impl PyAxis {
                 b.len()
             ),
             Bins::Count(n) => format!("n_bins={n}"),
+            Bins::Labels { kind, values } if values.len() <= 6 => {
+                format!("{}={values:?}", kind.name())
+            }
+            Bins::Labels { kind, values } => format!(
+                "{}=[{:?}, {:?}, ..., {:?}] ({} bins)",
+                kind.name(),
+                values[0],
+                values[1],
+                values[values.len() - 1],
+                values.len()
+            ),
         };
         format!(
             "Axis({bins}, total={})",

@@ -44,6 +44,15 @@ pub struct FmeshCard {
     pub energy_bounds: Option<Vec<f64>>,
     /// Time bin bounds in shakes, starting at -1e36, when it has `TMESH`.
     pub time_bounds: Option<Vec<f64>>,
+    /// D1SUNED's `ETAG=`, lowercased (`nuc`, `parent`, `cel`, ...): what
+    /// `EMESH` lists in place of energies.
+    pub energy_tag: Option<String>,
+    /// D1SUNED's `TTAG=` the same way (`dtme`: decay times).
+    pub time_tag: Option<String>,
+    /// `EMESH` as written, for a tagged mesh, whose values are not bounds.
+    pub energy_values: Option<Vec<f64>>,
+    /// `TMESH` as written, the same way.
+    pub time_values: Option<Vec<f64>>,
     /// The `OUT=` value as written, lowercased.
     pub out: Option<String>,
     /// 1-based line of the card in the input.
@@ -427,6 +436,10 @@ fn read_card(model: &Model, card: DataCard, id: u32, line: usize) -> Result<Fmes
         transform,
         energy_bounds: axis("emesh", "eints", 0.0)?,
         time_bounds: axis("tmesh", "tints", -1e36)?,
+        energy_tag: word("etag")?,
+        time_tag: word("ttag")?,
+        energy_values: numbers("emesh")?,
+        time_values: numbers("tmesh")?,
         out: word("out")?,
         line,
     })

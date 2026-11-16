@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use aci_tallies_geom::mcnp_input::{FmeshCard, FmeshError};
 
-use super::header::SectionHeader;
-use crate::common::{Input, Warning};
+use super::header::{HeaderLabels, SectionHeader};
+use crate::common::{Input, LabelKind, Warning};
 use crate::meshtal::model::Geometry;
 
 /// The FMESH cards of an MCNP input, by tally number.
@@ -111,30 +111,101 @@ fn apply(hdr: &mut SectionHeader, card: &FmeshCard) -> Result<(), String> {
         }
         _ => return Err("the header and the input disagree on GEOM".into()),
     }
-    // A meshinfo header has no energy bounds to compare.
-    if let Some(e) = card
-        .energy_bounds
-        .as_ref()
-        .filter(|_| !hdr.energy_bounds.is_empty())
-    {
+    // A meshinfo header has no energy bounds to compare, nor has a
+    // D1SUNED one whose bins are nuclides (or cells, decay times) instead.
+    let energy_bounded = hdr.energy_labels.is_none() && !hdr.energy_bounds.is_empty();
+    let time_bounded = hdr.time_labels.is_none();
+    if let Some(e) = card.energy_bounds.as_ref().filter(|_| energy_bounded) {
         same("energy", &hdr.energy_bounds, e, &sig3)?;
     }
-    if let Some(t) = &card.time_bounds {
+    if let Some(t) = card.time_bounds.as_ref().filter(|_| time_bounded) {
         same("time", &hdr.time_bounds, t, &sig3)?;
     }
+    let energy_labels = match &hdr.energy_labels {
+        Some(l) if l.overflowed => Some(recovered(
+            l,
+            card.energy_tag.as_deref(),
+            card.energy_values.as_deref(),
+            "ETAG/EMESH",
+        )?),
+        _ => None,
+    };
+    let time_labels = match &hdr.time_labels {
+        Some(l) if l.overflowed => Some(recovered(
+            l,
+            card.time_tag.as_deref(),
+            card.time_values.as_deref(),
+            "TTAG/TMESH",
+        )?),
+        _ => None,
+    };
 
     hdr.geometry = card.geometry().map_err(|e| e.to_string())?;
-    if let Some(e) = card
-        .energy_bounds
-        .as_ref()
-        .filter(|_| !hdr.energy_bounds.is_empty())
-    {
+    if let Some(e) = card.energy_bounds.as_ref().filter(|_| energy_bounded) {
         hdr.energy_bounds = e.clone();
     }
-    if let Some(t) = &card.time_bounds {
+    if let Some(t) = card.time_bounds.as_ref().filter(|_| time_bounded) {
         hdr.time_bounds = t.clone();
     }
+    if let Some(l) = energy_labels {
+        hdr.energy_labels = Some(l);
+    }
+    if let Some(l) = time_labels {
+        hdr.time_labels = Some(l);
+    }
     Ok(())
+}
+
+/// The labels D1SUNED meant to print for an overflowed list, from the
+/// FMESH card's tag and bins: `0.001` (every other nuclide or cell), then
+/// `<bin>.<n>` for the n-th bin from 2 on. The labels the header did
+/// print must agree.
+fn recovered(
+    header: &HeaderLabels,
+    tag: Option<&str>,
+    values: Option<&[f64]>,
+    card_words: &str,
+) -> Result<HeaderLabels, String> {
+    let expected = match header.kind {
+        LabelKind::Nuclide => &["nuc"][..],
+        LabelKind::Parent => &["parent", "nuc"][..],
+        LabelKind::Cell => &["cel", "cell"][..],
+        LabelKind::DecayTime => &[][..],
+    };
+    let (Some(tag), Some(values)) = (tag, values) else {
+        return Err(format!(
+            "the header's {} list overflowed and the card has no {card_words}",
+            header.kind.name()
+        ));
+    };
+    if !expected.contains(&tag) {
+        return Err(format!(
+            "the header's {} list overflowed but the card's tag is {tag:?}",
+            header.kind.name()
+        ));
+    }
+    let mut labels = vec![0.001];
+    for (n, v) in values.iter().enumerate() {
+        let label = format!("{}.{:03}", *v as i64, n + 2);
+        labels.push(label.parse().map_err(|_| format!("bad label {label}"))?);
+    }
+    let printed = &header.values;
+    if printed.len() > labels.len()
+        || printed
+            .iter()
+            .zip(&labels)
+            .any(|(a, b)| (a - b).abs() > 1e-6 * a.abs().max(1.0))
+    {
+        return Err(format!(
+            "the header's {} list {printed:?} does not start like the card's {labels:?}",
+            header.kind.name()
+        ));
+    }
+    Ok(HeaderLabels {
+        kind: header.kind,
+        values: labels,
+        overflowed: false,
+    })
 }
 
 /// A section header with the input's exact geometry applied (when given
