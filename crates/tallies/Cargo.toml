@@ -11,7 +11,7 @@ categories.workspace = true
 readme = "README.md"
 
 [dependencies]
-aci-tallies-geom = { path = "../geom", version = "=0.1.2", default-features = false, features = ["mcnp-input"] }
+aci-tallies-geom = { path = "../geom", version = "=0.1.3", default-features = false, features = ["mcnp-input"] }
 migjorn = "0.4.0"
 ndarray = { version = "0.16", features = ["rayon"] }
 memchr = "2"
