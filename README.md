@@ -82,8 +82,11 @@ scores exactly chord / volume). The input fixes the first two and the third:
 - **`*FMESH`** looks like `FMESH`; only the input says (`energy_weighted`).
 - Bounds around ±1e5–1e6 cm overflow MCNP's fixed-width fields: such a
   section is listed in `f.failed`.
-- MCNP5 prints no VEC for a cylinder: MCNP's default is used (`1 0 0`,
-  `0 1 0` for an axis along x, made perpendicular to the axis).
+- MCNP5 prints no VEC for a cylinder: MCNP's default, `1 0 0` made
+  perpendicular to the axis, is assumed, with a warning (`input=` gives the
+  one the run used). MCNP 6.2 and 6.3 use that default when the card has no
+  VEC, and stop when the axis is along x (the two are parallel): such a
+  header's VEC is unknown (NaN) without the input.
 
 ### D1SUNED meshtal sections
 
@@ -151,8 +154,13 @@ src = f[1]                                 # MeshTally: source per voxel and ene
 src.result.shape                           # (energy, 1, i, j, k), Total energy bin last
 ```
 
+- Read by parts like the other formats: opening indexes the file and reads
+  the headers; a read parses the mesh's voxels in parallel.
 - A voxel's source is the sum of its cells' (each cell's part of the voxel's
-  source, as D1SUNED writes them); voxels the file leaves out have none.
+  source, as D1SUNED writes them); voxels the file leaves out have none. The
+  Total bin is the sum of the bins, its error that of the sum; a voxel whose
+  printed source (or its cells' sum) differs from it by more than 1e-4 is
+  counted in a warning, as are voxels listed twice.
 - Energy bins (`energy_type bins`), or gamma lines (`lines`: an axis of
   labels, `kind == "line"`). A bound too large for its field (`******`)
   is NaN, with a warning.

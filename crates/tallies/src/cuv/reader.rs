@@ -31,7 +31,7 @@ use rayon::prelude::*;
 
 use super::header::{self, CuvHeader, FileKind};
 use super::model::{CuvInfo, Pairs};
-use crate::common::scan::{self, Chunk};
+use crate::common::scan::{self, Chunk, Segment};
 use crate::common::source::{Opened, Source};
 use crate::common::{float, Axis, Input, ReadError, Warning};
 use crate::meshtal::header::read_file_header;
@@ -64,15 +64,6 @@ struct Body {
     /// Energy bins of a cuvmsh (0 for a meshinfo).
     n_energy: usize,
     segments: OnceLock<Arc<Vec<Segment>>>,
-}
-
-/// Whole voxels, `voxels`, in bytes `bytes`.
-#[derive(Debug, Clone)]
-struct Segment {
-    bytes: Range<u64>,
-    voxels: Range<usize>,
-    /// Lines of the file before it.
-    line: u64,
 }
 
 /// What a read of a run of voxels found.
@@ -224,8 +215,8 @@ impl Reader {
         }
         let opened = self.source.open()?;
         let segments = self.segments(id, body, &opened)?;
-        let first = segments.partition_point(|s| s.voxels.end <= voxels.start);
-        let last = segments.partition_point(|s| s.voxels.start < voxels.end);
+        let first = segments.partition_point(|s| s.records.end <= voxels.start);
+        let last = segments.partition_point(|s| s.records.start < voxels.end);
         let parts = segments[first..last.max(first)]
             .par_iter()
             .map(|s| {
@@ -266,61 +257,19 @@ impl Reader {
         if let Some(s) = body.segments.get() {
             return Ok(s.clone());
         }
-        let data = body.data.clone();
-        let chunks = &self.chunks;
-        // Chunks overlapping the data.
-        let k0 = chunks
-            .partition_point(|c| c.at <= data.start)
-            .saturating_sub(1);
-        let k1 = chunks
-            .partition_point(|c| c.at < data.end)
-            .min(chunks.len() - 1);
-        let found = (k0..k1)
-            .into_par_iter()
-            .map(|k| {
-                let lo = chunks[k].at.max(data.start);
-                let hi = chunks[k + 1].at.min(data.end);
-                if lo >= hi {
-                    return Ok(None);
-                }
-                let line0 = if chunks[k].at < data.start {
-                    body.data_line
-                } else {
-                    chunks[k].lines
-                };
-                let text = opened.read(lo..hi)?;
-                let mut first = None;
-                let mut count = 0usize;
-                let base = text.as_ptr() as usize;
-                for (n, line) in scan::lines(&text).enumerate() {
-                    if is_voxel_line(self.kind, line) {
-                        if first.is_none() {
-                            let at = line.as_ptr() as usize - base;
-                            first = Some((lo + at as u64, line0 + n as u64));
-                        }
-                        count += 1;
-                    }
-                }
-                Ok(first.map(|f| (f, count)))
-            })
-            .collect::<Result<Vec<_>, ReadError>>()?;
-        let found: Vec<_> = found.into_iter().flatten().collect();
-        let mut segments = Vec::with_capacity(found.len());
-        let mut voxel = 0usize;
-        for (n, &((at, line), count)) in found.iter().enumerate() {
-            let end = found.get(n + 1).map_or(data.end, |f| f.0 .0);
-            segments.push(Segment {
-                bytes: at..end,
-                voxels: voxel..voxel + count,
-                line,
-            });
-            voxel += count;
-        }
-        if voxel != body.info.n_voxels {
+        let segments = scan::segments(
+            opened,
+            &self.chunks,
+            body.data.clone(),
+            body.data_line,
+            |line| is_voxel_line(self.kind, line),
+        )?;
+        let voxels = segments.last().map_or(0, |s| s.records.end);
+        if voxels != body.info.n_voxels {
             return Err(ReadError::Unsupported {
                 id,
                 reason: format!(
-                    "the {} lists {voxel} voxels, the mesh has {}",
+                    "the {} lists {voxels} voxels, the mesh has {}",
                     self.kind.name(),
                     body.info.n_voxels
                 ),
@@ -430,6 +379,8 @@ fn body(
     }
 }
 
+/// A whole number as a count or index field: digits, or the `*`s of one
+/// that overflowed its field.
 fn is_count(tok: &[u8]) -> bool {
     !tok.is_empty() && (tok.iter().all(u8::is_ascii_digit) || tok.iter().all(|&b| b == b'*'))
 }
@@ -472,7 +423,7 @@ fn parse_segment(
         low_density: 0,
         worst_volume: 0.0,
     };
-    let mut voxel = seg.voxels.start;
+    let mut voxel = seg.records.start;
     let base = seg.line + 1;
     let mut keep = false;
     let mut voxel_line = base;

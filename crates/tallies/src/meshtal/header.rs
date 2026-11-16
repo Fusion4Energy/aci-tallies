@@ -1,3 +1,5 @@
+use aci_tallies_geom::vec3::{normalize, perpendicular_unit, DEFAULT_VEC};
+
 use crate::common::{scan, Axis, LabelKind};
 use crate::meshtal::model::Geometry;
 
@@ -129,6 +131,10 @@ pub(crate) struct SectionHeader {
     pub energy_labels: Option<HeaderLabels>,
     /// The same, in place of the time bounds.
     pub time_labels: Option<HeaderLabels>,
+    /// False for a cylinder whose VEC the header leaves out (MCNP5): its
+    /// `vec` is MCNP's default made perpendicular to the axis, or NaN when
+    /// the two are parallel (MCNP then needed a VEC the header doesn't say).
+    pub vec_printed: bool,
 }
 
 impl SectionHeader {
@@ -207,8 +213,15 @@ pub(crate) fn parse_header(lines: &[&str]) -> Result<(SectionHeader, usize), Hea
     i += 1;
     i = skip_blank(lines, i);
 
+    let mut vec_printed = true;
     let geometry = if get(lines, i)?.contains("origin at") {
-        let (origin, axis, vec) = parse_cylindrical_origin(lines[i])?;
+        let (origin, axis, printed) = parse_cylindrical_origin(lines[i])?;
+        vec_printed = printed.is_some();
+        let vec = printed.unwrap_or_else(|| {
+            normalize(axis)
+                .and_then(|a| perpendicular_unit(DEFAULT_VEC, a))
+                .unwrap_or([f64::NAN; 3])
+        });
         i += 1;
         let r_bounds = parse_direction_line(get(lines, i)?, "R direction:")?;
         i += 1;
@@ -304,6 +317,7 @@ pub(crate) fn parse_header(lines: &[&str]) -> Result<(SectionHeader, usize), Hea
         time_bounds,
         energy_labels,
         time_labels,
+        vec_printed,
     };
     Ok((header, i))
 }
@@ -382,10 +396,10 @@ fn parse_floats_after_colon(line: &str) -> Option<Vec<f64>> {
 type Triple = [f64; 3];
 
 /// Parse the `origin at X Y Z axis in X Y Z direction, VEC direction X Y Z`
-/// line that precedes cylindrical mesh bin boundaries. MCNP5 writes `origin
-/// at X Y Z, axis in X Y Z direction`, with no VEC: MCNP's default, `1 0 0`
-/// (`0 1 0` for an axis along x), made perpendicular to the axis.
-fn parse_cylindrical_origin(line: &str) -> Result<(Triple, Triple, Triple), HeaderError> {
+/// line that precedes cylindrical mesh bin boundaries: origin, axis and VEC
+/// as printed. MCNP5 writes `origin at X Y Z, axis in X Y Z direction`, with
+/// no VEC (None).
+fn parse_cylindrical_origin(line: &str) -> Result<(Triple, Triple, Option<Triple>), HeaderError> {
     let spaced = line.replace(',', " ");
     let tokens: Vec<&str> = spaced.split_whitespace().collect();
     let err = || HeaderError::BadCylindricalOrigin(line.to_string());
@@ -402,34 +416,11 @@ fn parse_cylindrical_origin(line: &str) -> Result<(Triple, Triple, Triple), Head
 
     let vec = match tokens.iter().position(|&t| t == "VEC") {
         // tokens[vec_kw] == "VEC", tokens[vec_kw + 1] == "direction", then 3 floats.
-        Some(vec_kw) => parse_triple(&tokens, vec_kw + 2).ok_or_else(err)?,
-        None => default_vec(axis).ok_or_else(err)?,
+        Some(vec_kw) => Some(parse_triple(&tokens, vec_kw + 2).ok_or_else(err)?),
+        None => None,
     };
 
     Ok((origin, axis, vec))
-}
-
-/// MCNP's default VEC for a cylinder along `axis`, perpendicular to it.
-fn default_vec(axis: Triple) -> Option<Triple> {
-    let norm = |a: Triple| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-    let n = norm(axis);
-    if n == 0.0 {
-        return None;
-    }
-    let axis = [axis[0] / n, axis[1] / n, axis[2] / n];
-    let v = if (axis[0] - 1.0).abs() < 1e-12 {
-        [0.0, 1.0, 0.0]
-    } else {
-        [1.0, 0.0, 0.0]
-    };
-    let along = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
-    let p = [
-        v[0] - along * axis[0],
-        v[1] - along * axis[1],
-        v[2] - along * axis[2],
-    ];
-    let m = norm(p);
-    (m > 1e-12).then(|| [p[0] / m, p[1] / m, p[2] / m])
 }
 
 fn parse_triple(tokens: &[&str], start: usize) -> Option<[f64; 3]> {
@@ -509,16 +500,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mcnp5_cylinder_has_the_default_vec() {
+    fn mcnp5_cylinder_prints_no_vec() {
         let line = "  origin at   1.00E+00  2.00E+00  3.00E+00, axis in   0.00E+00  0.00E+00  1.00E+00 direction";
         let (origin, axis, vec) = parse_cylindrical_origin(line).unwrap();
         assert_eq!(origin, [1.0, 2.0, 3.0]);
         assert_eq!(axis, [0.0, 0.0, 1.0]);
-        assert_eq!(vec, [1.0, 0.0, 0.0]);
-        let line = "  origin at 0 0 0, axis in 1.00E+00 0 0 direction";
-        assert_eq!(parse_cylindrical_origin(line).unwrap().2, [0.0, 1.0, 0.0]);
+        assert_eq!(vec, None);
         let mcnp6 = "origin at 0 0 0 axis in 0 0 1 direction, VEC direction 0 1 0";
-        assert_eq!(parse_cylindrical_origin(mcnp6).unwrap().2, [0.0, 1.0, 0.0]);
+        assert_eq!(
+            parse_cylindrical_origin(mcnp6).unwrap().2,
+            Some([0.0, 1.0, 0.0])
+        );
+    }
+
+    /// A section with the cylinder line `origin`.
+    fn cylinder(origin: &str) -> SectionHeader {
+        let text = format!(
+            " Mesh Tally Number        14\n neutron   mesh tally.\n\n Tally bin boundaries:\n{origin}\n    R direction:       0.00       1.00\n    Z direction:       0.00       1.00\n    Theta direction (revolutions):  0.000  1.000\n    Energy bin boundaries:  0.00E+00  1.00E+36\n"
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        parse_header(&lines).unwrap().0
+    }
+
+    /// With no VEC printed, MCNP's default `1 0 0` (what MCNP 6.2 and 6.3
+    /// use when the card has none), made perpendicular to the axis.
+    #[test]
+    fn mcnp5_cylinder_takes_the_default_vec() {
+        let vec = |h: SectionHeader| match h.geometry {
+            Geometry::Cylindrical { vec, .. } => vec,
+            _ => unreachable!(),
+        };
+        let h = cylinder("  origin at 0 0 0, axis in 0.00E+00 0.00E+00 1.00E+00 direction");
+        assert!(!h.vec_printed);
+        assert_eq!(vec(h), [1.0, 0.0, 0.0]);
+        let h = cylinder("  origin at 0 0 0, axis in 0.00E+00 1.00E+00 0.00E+00 direction");
+        assert_eq!(vec(h), [1.0, 0.0, 0.0]);
+        let h = cylinder("  origin at 0 0 0, axis in 7.07E-01 7.07E-01 0.00E+00 direction");
+        let v = vec(h);
+        let s = 0.5f64.sqrt();
+        assert!((v[0] - s).abs() < 1e-12 && (v[1] + s).abs() < 1e-12 && v[2] == 0.0);
+        // Along x, the default is parallel: MCNP stops ("axs and vec vectors
+        // are parallel"), so the run had a VEC the header doesn't say.
+        let h = cylinder("  origin at 0 0 0, axis in 1.00E+00 0.00E+00 0.00E+00 direction");
+        assert!(vec(h).iter().all(|x| x.is_nan()));
+        let h = cylinder("  origin at 0 0 0 axis in 0 0 1 direction, VEC direction 0 1 0");
+        assert!(h.vec_printed);
+        assert_eq!(vec(h), [0.0, 1.0, 0.0]);
     }
 
     #[test]

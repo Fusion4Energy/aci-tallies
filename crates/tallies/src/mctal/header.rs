@@ -8,8 +8,7 @@
 use ndarray::Array2;
 
 use super::model::{
-    Detector, FileHeader, Kcode, MeshGrid, Modifier, Number, RawHeader, TallyInfo, Tfc, DIMS,
-    PARTICLES,
+    Detector, FileHeader, Kcode, MeshGrid, Modifier, Number, TallyInfo, Tfc, DIMS, PARTICLES,
 };
 use crate::common::{Axis, Bins, Warning};
 
@@ -121,11 +120,6 @@ pub(crate) fn read_tally_header(text: &str, id: u32, line: u64) -> Result<TallyI
     }
     let mut at = 1;
     let mut particles = Vec::new();
-    let mut raw = RawHeader {
-        particle_code: head.get(1).copied().unwrap_or(0),
-        detector_code: head.get(2).copied().unwrap_or(0),
-        ..RawHeader::default()
-    };
     match head.get(1).copied() {
         Some(n) if n < 0 => {
             let mut flags = Vec::new();
@@ -133,7 +127,6 @@ pub(crate) fn read_tally_header(text: &str, id: u32, line: u64) -> Result<TallyI
                 flags.extend(lines[at].split_whitespace().map(|w| w == "1"));
                 at += 1;
             }
-            raw.particle_flags = flags.iter().map(|&f| u8::from(f)).collect();
             particles = flags
                 .iter()
                 .zip(PARTICLES)
@@ -173,7 +166,6 @@ pub(crate) fn read_tally_header(text: &str, id: u32, line: u64) -> Result<TallyI
     while at < lines.len() && bin_keyword(lines[at]).is_none() {
         let l = lines[at];
         let piece = l.get(5..).unwrap_or("");
-        raw.comment_lines.push(piece.trim_end().to_string());
         comment.push_str(piece);
         if piece.len() < 75 {
             comment.extend(std::iter::repeat_n(' ', 75 - piece.len()));
@@ -235,7 +227,6 @@ pub(crate) fn read_tally_header(text: &str, id: u32, line: u64) -> Result<TallyI
             .filter(|&n| n >= 0)
             .ok_or_else(|| format!("unreadable {} bins line", DIMS[dim]))?
             as usize;
-        raw.bin_counts.push(count as u64);
         if dim == 0 && words.len() >= 5 {
             // A TMESH mesh tally: `f cells 0 n1 n2 n3`, then the grid.
             let n: Vec<usize> = words[2..5].iter().filter_map(|w| w.parse().ok()).collect();
@@ -321,7 +312,6 @@ pub(crate) fn read_tally_header(text: &str, id: u32, line: u64) -> Result<TallyI
         numbers,
         bins: Vec::new(),
         mesh,
-        raw,
         warnings,
     })
 }

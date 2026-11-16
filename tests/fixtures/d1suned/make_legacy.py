@@ -24,12 +24,7 @@ for line in lines[1:]:
         heights = [float(v) for v in line.split(":")[1].split()]
     elif line.lstrip().startswith("Theta direction (revolutions):"):
         turns = [float(v) for v in line.split(":")[1].split()]
-        line = (
-            line.split(":")[0]
-            + ":"
-            + "".join(f"{2 * math.pi * t:10.8f}" for t in turns)
-            + "\n"
-        )
+        line = line.split(":")[0] + ":" + "".join(f"{2 * math.pi * t:10.8f}" for t in turns) + "\n"
     elif radii is not None and heights is not None:
         # A voxel line: index, volume, cell count (one theta bin).
         m = re.fullmatch(r"( *)(\d+)( +)(\S+)( +\d+\n)", line)
@@ -37,14 +32,8 @@ for line in lines[1:]:
             n = int(m.group(2)) - 1
             nz = len(heights) - 1
             i, k = divmod(n, nz)
-            v = (
-                math.pi
-                * (radii[i + 1] ** 2 - radii[i] ** 2)
-                * (heights[k + 1] - heights[k])
-            )
-            line = (
-                f"{m.group(1)}{m.group(2)}{m.group(3)}{2 * math.pi * v:.5E}{m.group(5)}"
-            )
+            v = math.pi * (radii[i + 1] ** 2 - radii[i] ** 2) * (heights[k + 1] - heights[k])
+            line = f"{m.group(1)}{m.group(2)}{m.group(3)}{2 * math.pi * v:.5E}{m.group(5)}"
     out.append(line)
 Path("legacy_3.1.4_cyl").mkdir(exist_ok=True)
 Path("legacy_3.1.4_cyl/meshinfo").write_text("".join(out))

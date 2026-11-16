@@ -107,7 +107,10 @@ fn apply(hdr: &mut SectionHeader, card: &FmeshCard) -> Result<(), String> {
             same("theta", t, et, &fixed(THETA_TOL))?;
             same("origin", origin, eo, &sig3)?;
             same("axis", axis, ea, &sig3)?;
-            same("vec", vec, ev, &sig3)?;
+            // An MCNP5 header has no VEC to compare: the input's is the one.
+            if hdr.vec_printed {
+                same("vec", vec, ev, &sig3)?;
+            }
         }
         _ => return Err("the header and the input disagree on GEOM".into()),
     }
@@ -184,6 +187,14 @@ fn recovered(
             header.kind.name()
         ));
     }
+    // `<bin>.<n>` has three digits for n: past 999 bins it can't be told
+    // from a smaller n (`.1000` is `.1`).
+    if values.len() + 1 > 999 {
+        return Err(format!(
+            "the card's {card_words} has {} bins: more than the 999 a label can number",
+            values.len() + 1
+        ));
+    }
     let mut labels = vec![0.001];
     for (n, v) in values.iter().enumerate() {
         let label = format!("{}.{:03}", *v as i64, n + 2);
@@ -254,6 +265,12 @@ pub(crate) fn prepare_from(
                 "{problem}; geometry is from the {file} header"
             )));
         }
+    }
+    if !hdr.vec_printed && !geometry_from_input {
+        warnings.push(Warning::new(format!(
+            "the {file} header prints no cylinder VEC (MCNP5): MCNP's default, 1 0 0, is \
+             assumed (give the input for the VEC the run used)"
+        )));
     }
     // MCNP prints bounds with 2 decimals (3 for theta), so bins finer than
     // that collapse to zero width in the header. The values are still fine;

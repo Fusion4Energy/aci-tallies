@@ -46,7 +46,6 @@ use std::sync::Arc;
 
 use ndarray::Array2;
 
-pub(crate) use header::fixed_floats;
 pub use join::{CuvMesh, VoxelNorm};
 pub use model::{CuvInfo, CuvPart, Decomposition, Pairs, Spectra};
 

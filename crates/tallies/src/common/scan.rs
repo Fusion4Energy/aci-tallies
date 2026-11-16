@@ -16,7 +16,7 @@ use std::ops::Range;
 
 use rayon::prelude::*;
 
-use super::source::Opened;
+use super::source::{Opened, ReadError};
 
 /// Bytes per chunk: far above rayon's per-task cost, while a multi-GB
 /// section still splits into thousands of units for work stealing. Also
@@ -195,6 +195,79 @@ fn scan_part<K>(
             }
         }
     }
+}
+
+/// A run of whole records (a voxel and its lines, say) of a section's data:
+/// records `records` (counted from the data's first), in bytes `bytes`.
+#[derive(Debug, Clone)]
+pub(crate) struct Segment {
+    pub bytes: Range<u64>,
+    pub records: Range<usize>,
+    /// Lines of the file before it.
+    pub line: u64,
+}
+
+/// Bytes `data` of a file indexed into `chunks`, which start on line
+/// `data_line` (from 0), cut into segments of whole records, about a chunk
+/// each: a record starts at every line `is_start` accepts. One parallel
+/// pass over the data.
+pub(crate) fn segments(
+    src: &Opened<'_>,
+    chunks: &[Chunk],
+    data: Range<u64>,
+    data_line: u64,
+    is_start: impl Fn(&[u8]) -> bool + Sync,
+) -> Result<Vec<Segment>, ReadError> {
+    // Chunks overlapping the data.
+    let k0 = chunks
+        .partition_point(|c| c.at <= data.start)
+        .saturating_sub(1);
+    let k1 = chunks
+        .partition_point(|c| c.at < data.end)
+        .min(chunks.len() - 1);
+    // In each, where its first record starts (byte, line) and how many do.
+    let found = (k0..k1)
+        .into_par_iter()
+        .map(|k| {
+            let lo = chunks[k].at.max(data.start);
+            let hi = chunks[k + 1].at.min(data.end);
+            if lo >= hi {
+                return Ok(None);
+            }
+            let line0 = if chunks[k].at < data.start {
+                data_line
+            } else {
+                chunks[k].lines
+            };
+            let text = src.read(lo..hi)?;
+            let mut first = None;
+            let mut count = 0usize;
+            let base = text.as_ptr() as usize;
+            for (n, line) in lines(&text).enumerate() {
+                if is_start(line) {
+                    if first.is_none() {
+                        let at = line.as_ptr() as usize - base;
+                        first = Some((lo + at as u64, line0 + n as u64));
+                    }
+                    count += 1;
+                }
+            }
+            Ok(first.map(|f| (f, count)))
+        })
+        .collect::<Result<Vec<_>, ReadError>>()?;
+    let found: Vec<_> = found.into_iter().flatten().collect();
+    let mut segments = Vec::with_capacity(found.len());
+    let mut record = 0usize;
+    for (n, &((at, line), count)) in found.iter().enumerate() {
+        let end = found.get(n + 1).map_or(data.end, |f| f.0 .0);
+        segments.push(Segment {
+            bytes: at..end,
+            records: record..record + count,
+            line,
+        });
+        record += count;
+    }
+    Ok(segments)
 }
 
 struct Scan<K> {

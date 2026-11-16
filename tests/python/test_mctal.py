@@ -117,31 +117,6 @@ def test_kcode_and_perturbations() -> None:
         f.read(4, perturbation=3)
     assert f.info(5).detector == "point" and f.info(15).detector == "ring"
     assert f.info(14).modifier == "*" and f.info(6).modifier == "+"
-    # The tally lines' own numbers.
-    assert f.info(5).detector_code == 1 and f.info(15).detector_code == 2
-    assert f.info(4).detector_code == 0
-
-
-def test_raw_header(probe: mctal.MctalFile) -> None:
-    for id in probe.ids:
-        info = probe.info(id)
-        assert info.particle_code != 0
-        if info.particle_code < 0:
-            flags = info.particle_flags
-            assert isinstance(flags, list) and set(flags) <= {0, 1}
-            assert sum(flags) == -info.particle_code
-            assert len(info.particles) == -info.particle_code
-        else:
-            assert info.particle_flags is None
-        counts = info.bin_counts
-        assert len(counts) == 8
-        for n, axis in zip(counts[1:], list(info.axes.values())[1:]):
-            assert len(axis) == max(n, 1)
-        if info.comment is None:
-            assert info.comment_lines == []
-        else:
-            joined = " ".join(info.comment_lines)
-            assert joined.split() == info.comment.split()
 
 
 # F4Enix's test files: `F4ENIX_RESOURCES` (its `tests/resources`), else

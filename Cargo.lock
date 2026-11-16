@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aci-tallies"
-version = "0.2.0"
+version = "0.1.1"
 dependencies = [
  "aci-tallies-geom",
  "approx",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "aci-tallies-geom"
-version = "0.2.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "flate2",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "aci-tallies-py"
-version = "0.2.0"
+version = "0.1.1"
 dependencies = [
  "aci-tallies",
  "aci-tallies-geom",

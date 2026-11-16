@@ -139,18 +139,6 @@ pub enum VoxelNorm {
     CellFraction,
 }
 
-impl VoxelNorm {
-    /// From F4Enix's names: `ctot`, `celf`, or none.
-    pub fn from_name(name: Option<&str>) -> Option<VoxelNorm> {
-        match name {
-            None => Some(VoxelNorm::Average),
-            Some("ctot") => Some(VoxelNorm::Total),
-            Some("celf") => Some(VoxelNorm::CellFraction),
-            Some(_) => None,
-        }
-    }
-}
-
 impl Spectra {
     /// The flux of each voxel read, as a meshtal tally of mesh `info`: the
     /// sum over its cells of their flux times their share of its volume,
@@ -187,9 +175,19 @@ impl Spectra {
                 var[e * voxels + v] = 0.0;
             }
         }
+        // Sorted, for a binary search per pair.
+        let cells = cells.map(|c| {
+            let mut c = c.to_vec();
+            c.sort_unstable();
+            c.dedup();
+            c
+        });
         let mut kept_fraction = vec![0.0; voxels];
         for p in 0..self.pairs.len() {
-            if cells.is_some_and(|c| !c.contains(&self.pairs.cell[p])) {
+            if cells
+                .as_ref()
+                .is_some_and(|c| c.binary_search(&self.pairs.cell[p]).is_err())
+            {
                 continue;
             }
             let v = self.pairs.voxel[p] as usize;

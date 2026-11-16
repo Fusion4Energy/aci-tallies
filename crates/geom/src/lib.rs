@@ -37,8 +37,11 @@ use std::fmt;
 
 #[cfg(feature = "mcnp-input")]
 pub mod mcnp_input;
+pub mod vec3;
 #[cfg(feature = "vtk")]
 pub mod vtk;
+
+use vec3::{add, cross, dot, normalize, perpendicular_unit, scale, sub};
 
 /// The spatial mesh geometry.
 #[derive(Debug, Clone, PartialEq)]
@@ -474,8 +477,9 @@ pub struct CylFrame {
 
 impl CylFrame {
     pub fn new(origin: [f64; 3], axis: [f64; 3], vec: [f64; 3]) -> Self {
-        let e_axis = normalize(axis);
-        let e_ref = normalize(sub(vec, scale(e_axis, dot(vec, e_axis))));
+        // A degenerate frame (which `validate` refuses) gives NaN.
+        let e_axis = normalize(axis).unwrap_or([f64::NAN; 3]);
+        let e_ref = perpendicular_unit(vec, e_axis).unwrap_or([f64::NAN; 3]);
         let e_perp = cross(e_axis, e_ref);
         CylFrame {
             origin,
@@ -502,29 +506,6 @@ impl CylFrame {
         let theta = if theta < 0.0 { theta + 1.0 } else { theta };
         ((x * x + y * y).sqrt(), z, theta)
     }
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-fn add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
-    [a[0] * s, a[1] * s, a[2] * s]
-}
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-fn normalize(a: [f64; 3]) -> [f64; 3] {
-    scale(a, 1.0 / dot(a, a).sqrt())
 }
 
 #[cfg(test)]

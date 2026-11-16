@@ -99,28 +99,6 @@ pub enum Modifier {
     Plus,
 }
 
-/// A tally's header as written, for tools that keep MCTAL's own codes:
-/// the numbers of its `tally` line, its particle flags and its comment
-/// lines.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RawHeader {
-    /// The `tally` line's second number: the particle type (MCNP5's bit
-    /// code), or minus the number of particles flagged.
-    pub particle_code: i64,
-    /// Its third number: the detector type ([`Detector`]'s code), negative
-    /// for a `TMESH` mesh tally; 0 when not written.
-    pub detector_code: i64,
-    /// The 0/1 particle flags, when `particle_code` is negative.
-    pub particle_flags: Vec<u8>,
-    /// The comment's lines, each without its first 5 columns and trailing
-    /// blanks.
-    pub comment_lines: Vec<String>,
-    /// The number on each of the eight bin lines (`f d u s m c e t`), as
-    /// written: a Total bin counted, `0` where the axis has one bin
-    /// (`e 0`, but also `d 0` and `m 0`, unlike `d 1` and `m 1`).
-    pub bin_counts: Vec<u64>,
-}
-
 /// A cell or surface number from a tally's `f` line: MCTAL gives one for
 /// each bin whose first level is a single cell or surface; 0 for a group,
 /// the T bin, or a bin of several cells at its first level. A
@@ -177,8 +155,6 @@ pub struct TallyInfo {
     pub bins: Vec<TallyBin>,
     /// A `TMESH` mesh tally's grid.
     pub mesh: Option<MeshGrid>,
-    /// The tally's header as written.
-    pub raw: RawHeader,
     pub warnings: Vec<Warning>,
 }
 
@@ -219,8 +195,6 @@ pub struct Tally {
     /// See [`TallyInfo::bins`].
     pub bins: Vec<TallyBin>,
     pub mesh: Option<MeshGrid>,
-    /// See [`TallyInfo::raw`].
-    pub raw: RawHeader,
     /// The perturbation these are the values of (its `PERT` number), or
     /// `None` for the unperturbed ones.
     pub perturbation: Option<u32>,
@@ -246,7 +220,6 @@ impl Tally {
             numbers: self.numbers.clone(),
             bins: self.bins.clone(),
             mesh: self.mesh.clone(),
-            raw: self.raw.clone(),
             warnings: self.warnings.clone(),
         }
     }
@@ -269,7 +242,6 @@ impl Tally {
             numbers: info.numbers,
             bins: info.bins,
             mesh: info.mesh,
-            raw: info.raw,
             perturbation,
             result,
             rel_error,

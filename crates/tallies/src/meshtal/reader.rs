@@ -495,7 +495,7 @@ fn index_body(
         Some(Kind::Columns) => {
             let m = first.expect("matched");
             let row = opened.read(m.start..m.end).map_err(io_error)?;
-            let columns = Columns::from_header_row(&row);
+            let columns = Columns::from_header_row(&row)?;
             let energy = hdr.energy_axis(None);
             let time = hdr.time_axis(None);
             let (ni, nj, nk) = hdr.geometry.dims();

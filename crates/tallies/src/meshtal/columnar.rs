@@ -30,21 +30,38 @@ pub(crate) struct Columns {
 }
 
 impl Columns {
-    pub fn from_header_row(line: &[u8]) -> Columns {
-        // Every label before the first coordinate is one leading column,
-        // but for the `bin` of `Nuclide bin` and `Cell bin`.
-        let leading = scan::tokens(line)
-            .take_while(|t| !matches!(*t, b"X" | b"R"))
-            .filter(|t| *t != b"bin")
-            .count()
-            .min(2);
+    /// The columns of header row `line`; an error for a label before the
+    /// coordinates that is not one of these.
+    pub fn from_header_row(line: &[u8]) -> Result<Columns, String> {
+        // One leading column per label before the first coordinate; the
+        // `bin` of `Nuclide bin` and `Cell bin` is part of its label.
+        let mut leading = 0;
+        for t in scan::tokens(line).take_while(|t| !matches!(*t, b"X" | b"R")) {
+            match t {
+                b"Energy" | b"Time" | b"Nuclide" | b"Parent" | b"Cell" => leading += 1,
+                b"bin" if leading > 0 => {}
+                _ => {
+                    return Err(format!(
+                        "unknown column {:?} in the header row {:?}",
+                        String::from_utf8_lossy(t),
+                        String::from_utf8_lossy(line).trim()
+                    ))
+                }
+            }
+        }
+        if leading > 2 {
+            return Err(format!(
+                "more than two bin columns in the header row {:?}",
+                String::from_utf8_lossy(line).trim()
+            ));
+        }
         let has_volume = memchr::memmem::find(line, b"Volume").is_some();
         let result_col = 3 + leading;
-        Columns {
+        Ok(Columns {
             result_col,
             expected_cols: result_col + 2 + 2 * usize::from(has_volume),
             vol_col: has_volume.then_some(result_col + 2),
-        }
+        })
     }
 
     pub fn has_volume(&self) -> bool {
@@ -402,10 +419,11 @@ mod tests {
     fn columns() {
         let c = Columns::from_header_row(
             b"  Energy   Time   X   Y   Z  Result  Rel Error  Volume  Rslt * Vol",
-        );
+        )
+        .unwrap();
         assert_eq!((c.result_col, c.expected_cols, c.vol_col), (5, 9, Some(7)));
         assert_eq!(c.out_format(), OutFormat::Cf);
-        let c = Columns::from_header_row(b"   Time   R   Z   Th  Result  Rel Error");
+        let c = Columns::from_header_row(b"   Time   R   Z   Th  Result  Rel Error").unwrap();
         assert_eq!((c.result_col, c.expected_cols, c.vol_col), (4, 6, None));
         // D1SUNED discrete bins.
         for (row, result_col) in [
@@ -426,11 +444,19 @@ mod tests {
                 5,
             ),
         ] {
-            let c = Columns::from_header_row(row);
+            let c = Columns::from_header_row(row).unwrap();
             assert_eq!(
                 (c.result_col, c.expected_cols),
                 (result_col, result_col + 2)
             );
+        }
+        // Columns this reader doesn't know are refused, not guessed.
+        for row in [
+            &b"   Isotope   X   Y   Z  Result  Rel Error"[..],
+            b"   bin   X   Y   Z  Result  Rel Error",
+            b"   Energy   Time   Cell   X   Y   Z  Result  Rel Error",
+        ] {
+            assert!(Columns::from_header_row(row).is_err(), "{row:?}");
         }
     }
 

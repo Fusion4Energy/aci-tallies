@@ -108,7 +108,8 @@ impl PyAxis {
     }
 
     /// What the bins are: `"bounds"`, `"upper"` or `"count"`, or for
-    /// discrete bins `"nuclide"`, `"parent"`, `"cell"` or `"decay_time"`.
+    /// discrete bins `"nuclide"`, `"parent"`, `"cell"`, `"decay_time"` or
+    /// `"line"` (a CDGS source's gamma lines).
     #[getter]
     fn kind(&self) -> &'static str {
         match &self.axis.bins {

@@ -315,12 +315,17 @@ impl PyCuvFile {
         cells: Option<Vec<u32>>,
         norm: Option<&str>,
     ) -> PyResult<PyMeshTally> {
-        let norm = VoxelNorm::from_name(norm).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "norm must be None, \"ctot\" or \"celf\", not {:?}",
-                norm.unwrap_or_default()
-            ))
-        })?;
+        // F4Enix's names.
+        let norm = match norm {
+            None => VoxelNorm::Average,
+            Some("ctot") => VoxelNorm::Total,
+            Some("celf") => VoxelNorm::CellFraction,
+            Some(other) => {
+                return Err(PyValueError::new_err(format!(
+                    "norm must be None, \"ctot\" or \"celf\", not {other:?}"
+                )))
+            }
+        };
         let files = &self.files;
         let tally = py
             .allow_threads(|| -> Result<_, ReadError> {
