@@ -170,7 +170,7 @@ fn recovered(
         LabelKind::Nuclide => &["nuc"][..],
         LabelKind::Parent => &["parent", "nuc"][..],
         LabelKind::Cell => &["cel", "cell"][..],
-        LabelKind::DecayTime => &[][..],
+        LabelKind::DecayTime | LabelKind::Line => &[][..],
     };
     let (Some(tag), Some(values)) = (tag, values) else {
         return Err(format!(

@@ -82,6 +82,8 @@ scores exactly chord / volume). The input fixes the first two and the third:
 - **`*FMESH`** looks like `FMESH`; only the input says (`energy_weighted`).
 - Bounds around ±1e5–1e6 cm overflow MCNP's fixed-width fields: such a
   section is listed in `f.failed`.
+- MCNP5 prints no VEC for a cylinder: MCNP's default is used (`1 0 0`,
+  `0 1 0` for an axis along x, made perpendicular to the axis).
 
 ### D1SUNED meshtal sections
 
@@ -134,6 +136,31 @@ Found by running MCNP 6.2 and 6.3 on `tests/fixtures/mctal/*.mcnp`:
 - Values below 1e-99 are printed without the `E` (`2.50000-113`), in MCTAL
   and meshtal files alike: read exactly here (some other readers take them
   for 0).
+
+## CDGS files (D1SUNED)
+
+A Common Decay Gamma Source file holds decay gamma sources on meshes, as
+D1SUNED (and F4Enix) write them.
+
+```python
+from aci_tallies import cdgs
+
+f = cdgs.open("cdgs")                      # aci_tallies.open works too
+f.info(1).cooling_time, f.info(1).strength # s, photons/s
+src = f[1]                                 # MeshTally: source per voxel and energy bin
+src.result.shape                           # (energy, 1, i, j, k), Total energy bin last
+```
+
+- A voxel's source is the sum of its cells' (each cell's part of the voxel's
+  source, as D1SUNED writes them); voxels the file leaves out have none.
+- Energy bins (`energy_type bins`), or gamma lines (`lines`: an axis of
+  labels, `kind == "line"`). A bound too large for its field (`******`)
+  is NaN, with a warning.
+- Rectangular and cylindrical meshes. A cylinder's bounds and voxels are
+  printed r, theta, z: they are put in (r, z, theta) order. A rectangular
+  mesh placed by a `TR` card has its frame (origin, x and y axes) as
+  `geometry.transform`, with a warning: no file has confirmed that reading
+  yet.
 
 ## CuV files (D1SUNED)
 

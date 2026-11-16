@@ -26,6 +26,8 @@ pub enum OutFormat {
     /// Not a meshtal section: a D1SUNED cell-under-voxel mesh (`out=cuv`)
     /// summed over the cells of each voxel ([`crate::cuv`]).
     Cuv,
+    /// Not a meshtal section: a D1SUNED decay gamma source ([`crate::cdgs`]).
+    Cdgs,
 }
 
 impl OutFormat {
@@ -38,6 +40,7 @@ impl OutFormat {
             OutFormat::Ik => "ik",
             OutFormat::Jk => "jk",
             OutFormat::Cuv => "cuv",
+            OutFormat::Cdgs => "cdgs",
         }
     }
 }

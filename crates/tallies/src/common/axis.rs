@@ -45,6 +45,8 @@ pub enum LabelKind {
     Cell,
     /// D1SUNED decay (cooling) times, in seconds; they have no Total.
     DecayTime,
+    /// Gamma lines (MeV) of a CDGS source.
+    Line,
 }
 
 impl LabelKind {
@@ -54,6 +56,7 @@ impl LabelKind {
             LabelKind::Parent => "parent",
             LabelKind::Cell => "cell",
             LabelKind::DecayTime => "decay_time",
+            LabelKind::Line => "line",
         }
     }
 }

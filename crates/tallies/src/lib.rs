@@ -3,11 +3,13 @@
 //! - [`meshtal`]: FMESH mesh tallies (`meshtal` files).
 //! - [`mctal`]: `F` tallies (MCTAL files).
 //! - [`cuv`]: D1SUNED cell-under-voxel meshes (`cuvmsh` and `meshinfo`).
+//! - [`cdgs`]: D1SUNED decay gamma sources (CDGS files).
 //!
 //! Every reader indexes a file in one parallel pass and then reads what is
 //! asked for (a tally, or part of one) from disk, so files much larger than
 //! memory can be read by parts.
 
+pub mod cdgs;
 pub mod common;
 pub mod cuv;
 pub mod mctal;
@@ -22,6 +24,7 @@ pub enum Format {
     Mctal,
     Cuvmsh,
     Meshinfo,
+    Cdgs,
 }
 
 /// The format of a file from its first bytes (a few kB are enough), or
@@ -33,6 +36,8 @@ pub fn detect(head: &[u8]) -> Option<Format> {
         Some(Format::Cuvmsh)
     } else if cuv::is_meshinfo(head) {
         Some(Format::Meshinfo)
+    } else if cdgs::is_cdgs(head) {
+        Some(Format::Cdgs)
     } else if meshtal::is_meshtal(head) {
         Some(Format::Meshtal)
     } else {

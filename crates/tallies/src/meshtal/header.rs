@@ -340,9 +340,12 @@ fn parse_floats_after_colon(line: &str) -> Option<Vec<f64>> {
 type Triple = [f64; 3];
 
 /// Parse the `origin at X Y Z axis in X Y Z direction, VEC direction X Y Z`
-/// line that precedes cylindrical mesh bin boundaries.
+/// line that precedes cylindrical mesh bin boundaries. MCNP5 writes `origin
+/// at X Y Z, axis in X Y Z direction`, with no VEC: MCNP's default, `1 0 0`
+/// (`0 1 0` for an axis along x), made perpendicular to the axis.
 fn parse_cylindrical_origin(line: &str) -> Result<(Triple, Triple, Triple), HeaderError> {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let spaced = line.replace(',', " ");
+    let tokens: Vec<&str> = spaced.split_whitespace().collect();
     let err = || HeaderError::BadCylindricalOrigin(line.to_string());
 
     let at = tokens.iter().position(|&t| t == "at").ok_or_else(err)?;
@@ -355,11 +358,36 @@ fn parse_cylindrical_origin(line: &str) -> Result<(Triple, Triple, Triple), Head
         .ok_or_else(err)?;
     let axis = parse_triple(&tokens, axis_in + 1).ok_or_else(err)?;
 
-    let vec_kw = tokens.iter().position(|&t| t == "VEC").ok_or_else(err)?;
-    // tokens[vec_kw] == "VEC", tokens[vec_kw + 1] == "direction", then 3 floats.
-    let vec = parse_triple(&tokens, vec_kw + 2).ok_or_else(err)?;
+    let vec = match tokens.iter().position(|&t| t == "VEC") {
+        // tokens[vec_kw] == "VEC", tokens[vec_kw + 1] == "direction", then 3 floats.
+        Some(vec_kw) => parse_triple(&tokens, vec_kw + 2).ok_or_else(err)?,
+        None => default_vec(axis).ok_or_else(err)?,
+    };
 
     Ok((origin, axis, vec))
+}
+
+/// MCNP's default VEC for a cylinder along `axis`, perpendicular to it.
+fn default_vec(axis: Triple) -> Option<Triple> {
+    let norm = |a: Triple| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let n = norm(axis);
+    if n == 0.0 {
+        return None;
+    }
+    let axis = [axis[0] / n, axis[1] / n, axis[2] / n];
+    let v = if (axis[0] - 1.0).abs() < 1e-12 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let along = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
+    let p = [
+        v[0] - along * axis[0],
+        v[1] - along * axis[1],
+        v[2] - along * axis[2],
+    ];
+    let m = norm(p);
+    (m > 1e-12).then(|| [p[0] / m, p[1] / m, p[2] / m])
 }
 
 fn parse_triple(tokens: &[&str], start: usize) -> Option<[f64; 3]> {
@@ -432,4 +460,22 @@ pub(crate) fn read_file_header(text: &str) -> FileHeader {
         }
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcnp5_cylinder_has_the_default_vec() {
+        let line = "  origin at   1.00E+00  2.00E+00  3.00E+00, axis in   0.00E+00  0.00E+00  1.00E+00 direction";
+        let (origin, axis, vec) = parse_cylindrical_origin(line).unwrap();
+        assert_eq!(origin, [1.0, 2.0, 3.0]);
+        assert_eq!(axis, [0.0, 0.0, 1.0]);
+        assert_eq!(vec, [1.0, 0.0, 0.0]);
+        let line = "  origin at 0 0 0, axis in 1.00E+00 0 0 direction";
+        assert_eq!(parse_cylindrical_origin(line).unwrap().2, [0.0, 1.0, 0.0]);
+        let mcnp6 = "origin at 0 0 0 axis in 0 0 1 direction, VEC direction 0 1 0";
+        assert_eq!(parse_cylindrical_origin(mcnp6).unwrap().2, [0.0, 1.0, 0.0]);
+    }
 }
