@@ -55,8 +55,27 @@ fn check_compatible(a: &Tally, b: &Tally) -> Result<(), OpsError> {
     Ok(())
 }
 
+/// `a` with these values instead of its own, which must be shaped as they
+/// are (Total bins included: nothing is recomputed). Not `a`'s warnings: they
+/// were about reading the values replaced.
+pub fn with_values(
+    a: &Tally,
+    result: Array5<f64>,
+    rel_error: Array5<f64>,
+) -> Result<Tally, OpsError> {
+    for shape in [result.shape(), rel_error.shape()] {
+        if shape != a.result.shape() {
+            return Err(OpsError::ShapeMismatch(
+                a.result.shape().to_vec(),
+                shape.to_vec(),
+            ));
+        }
+    }
+    Ok(replaced(a, result, rel_error, a.volume.clone()))
+}
+
 /// `a`'s metadata with new values; no warnings (they were about reading).
-fn with_values(
+fn replaced(
     a: &Tally,
     result: Array5<f64>,
     rel_error: Array5<f64>,
@@ -96,7 +115,7 @@ fn linear(a: &Tally, b: &Tally, sign: f64) -> Result<Tally, OpsError> {
         (b.result.view(), b.rel_error.view()),
         sign,
     );
-    Ok(with_values(a, r, e, a.volume.clone()))
+    Ok(replaced(a, r, e, a.volume.clone()))
 }
 
 /// `a * b` per value. They must have the same bins and mesh.
@@ -116,13 +135,13 @@ fn product(a: &Tally, b: &Tally, divide: bool) -> Result<Tally, OpsError> {
         (b.result.view(), b.rel_error.view()),
         divide,
     );
-    Ok(with_values(a, r, e, a.volume.clone()))
+    Ok(replaced(a, r, e, a.volume.clone()))
 }
 
 /// Every value times `factor`, an exact constant: relative errors don't
 /// change. (`a + a` is not `2 a`: it treats the two as independent.)
 pub fn scale(a: &Tally, factor: f64) -> Tally {
-    with_values(a, &a.result * factor, a.rel_error.clone(), a.volume.clone())
+    replaced(a, &a.result * factor, a.rel_error.clone(), a.volume.clone())
 }
 
 /// Sum over the energy bins: MCNP's Total bin when it printed one, else
@@ -154,7 +173,7 @@ fn integrate(a: &Tally, dim: usize) -> Tally {
             )
         }
     };
-    let mut out = with_values(a, r, e, a.volume.clone());
+    let mut out = replaced(a, r, e, a.volume.clone());
     let collapsed = axis.collapsed();
     if dim == 0 {
         out.energy = collapsed;
@@ -203,7 +222,7 @@ pub fn integrate_space(a: &Tally) -> Tally {
             .expect("one value per bin")
     };
     let total = Array3::from_elem((1, 1, 1), weights.iter().sum::<f64>());
-    let mut out = with_values(a, five(|s| s.0), five(|s| s.1), Some(total));
+    let mut out = replaced(a, five(|s| s.0), five(|s| s.1), Some(total));
     out.geometry = select_mesh(&a.geometry, None, None, None, true);
     out
 }
@@ -310,7 +329,7 @@ pub fn isel(
         let v: ArrayView3<f64> = v.slice(s![ir.clone(), jr.clone(), kr.clone()]);
         v.to_owned()
     });
-    let mut out = with_values(a, cut(&a.result), cut(&a.rel_error), volume);
+    let mut out = replaced(a, cut(&a.result), cut(&a.rel_error), volume);
     out.energy = energy_axis;
     out.time = time_axis;
     out.geometry = select_mesh(&a.geometry, i.as_ref(), j.as_ref(), k.as_ref(), false);
@@ -352,6 +371,25 @@ mod tests {
 
     fn one() -> Axis {
         Axis::mcnp(vec![0.0, 1e36])
+    }
+
+    #[test]
+    fn new_values() {
+        let mut a = tally(one(), one(), |_, _, i| [10.0, 0.0][i], 0.1);
+        a.volume = Some(Array3::from_elem((2, 1, 1), 3.0));
+        let shape = a.result.raw_dim();
+        let (r, e) = (Array5::from_elem(shape, 7.0), Array5::from_elem(shape, 0.5));
+        let b = with_values(&a, r.clone(), e.clone()).unwrap();
+        assert_eq!((&b.result, &b.rel_error), (&r, &e));
+        assert_eq!((b.id, &b.volume), (a.id, &a.volume));
+        assert_eq!(a.result[[0, 0, 0, 0, 0]], 10.0);
+        let bad = Array5::zeros((1, 1, 1, 1, 2));
+        for (r, e) in [(bad.clone(), e), (r, bad)] {
+            assert_eq!(
+                with_values(&a, r, e).unwrap_err(),
+                OpsError::ShapeMismatch(vec![1, 1, 2, 1, 1], vec![1, 1, 1, 1, 2])
+            );
+        }
     }
 
     #[test]

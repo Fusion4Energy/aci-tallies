@@ -21,6 +21,11 @@ for, a tally or part of one at a time, straight from disk into the arrays
 returned. A 50 GB file opens in well under a second, and only what you read
 is ever in memory.
 
+Every object is immutable (its arrays are read-only, or copies made when
+asked for), so `copy.copy` and `copy.deepcopy` give back the object itself:
+deep-copying something that holds one (a list of tallies, a mesh object of
+another package) works and shares it.
+
 - `crates/tallies` (`aci-tallies`): the readers. `common` (file sources, the
   parallel scan, Fortran number parsing, bins, error propagation),
   `meshtal`, `mctal`, `cuv`.
@@ -58,7 +63,8 @@ tally number to `MeshTally`.
   `2 * t`), `isel(energy=, time=, i=, j=, k=)` with ints, slices or
   `"total"`, `integrate_energy()`/`integrate_time()` (MCNP's Total bin when
   printed: its error comes from the histories, which summing can't
-  reproduce), `integrate_space()`.
+  reproduce), `integrate_space()`. `with_values(result, rel_error)` is the
+  same tally with other values (a merge or weighting of your own).
 - `to_polars()`/`to_parquet()` (one row per value; an axis with one bin gets
   no columns), `to_xarray()`, `to_pyvista()` (every field and bin attached),
   `to_vtk(path)` (written by Rust, no PyVista needed).

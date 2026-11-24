@@ -658,3 +658,5 @@ impl PyCuvPairs {
         call(slf, "aci_tallies._html", "cuv_pairs", ())
     }
 }
+
+crate::common::immutable!(PyCuvFile, PyCuvInfo, PyCuvPairs);

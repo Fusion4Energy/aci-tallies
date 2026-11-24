@@ -24,6 +24,30 @@ pub fn io_error(e: std::io::Error) -> PyErr {
     PyIOError::new_err(e.to_string())
 }
 
+/// `__copy__` and `__deepcopy__` for frozen classes whose contents never
+/// change: like a `tuple`, a copy is the object itself, so `copy.deepcopy`
+/// of anything holding one (e.g. an F4Enix mesh) works and shares it.
+macro_rules! immutable {
+    ($($ty:ty),+ $(,)?) => {$(
+        #[pymethods]
+        impl $ty {
+            fn __copy__(slf: Bound<'_, Self>) -> Bound<'_, Self> {
+                slf
+            }
+
+            fn __deepcopy__<'py>(
+                slf: Bound<'py, Self>,
+                _memo: &Bound<'py, PyAny>,
+            ) -> Bound<'py, Self> {
+                slf
+            }
+        }
+    )+};
+}
+pub(crate) use immutable;
+
+immutable!(PyReadWarning, PyAxis, PyInput);
+
 /// `array`, owned by `owner`, as a read-only numpy array without a copy.
 ///
 /// # Safety

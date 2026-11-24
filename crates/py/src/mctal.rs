@@ -738,3 +738,12 @@ impl PyBin {
         format!("Bin({:?})", self.bin.to_string())
     }
 }
+
+crate::common::immutable!(
+    PyMctalFile,
+    PyMctalInfo,
+    PyMctalTally,
+    PyTfc,
+    PyKcode,
+    PyBin
+);

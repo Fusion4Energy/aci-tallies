@@ -273,3 +273,5 @@ pub fn geometry(py: Python<'_>, g: &Geometry) -> PyResult<Py<PyGeometry>> {
         },
     )
 }
+
+crate::common::immutable!(PyGeometry);

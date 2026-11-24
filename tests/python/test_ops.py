@@ -149,3 +149,35 @@ def test_isel_rejects_empty_and_out_of_bounds_ranges(parsed):
     assert t.isel(i=slice(0, 100)).shape == t.shape
     with pytest.raises(IndexError, match="out of range"):
         t.isel(i=100)
+
+
+def test_with_values(parsed):
+    t = _tally(parsed, 34)
+    before = t.result.copy()
+    # any memory layout and dtype; copied
+    result = np.asfortranarray(t.result * 3).astype(np.float32, order="F")
+    rel_error = np.full(t.shape, 0.5)
+    new = t.with_values(result, rel_error)
+    np.testing.assert_array_equal(new.result, result.astype(float))
+    np.testing.assert_array_equal(new.rel_error, rel_error)
+    result[...] = -1
+    assert (new.result >= 0).all() and not new.result.flags.writeable
+    np.testing.assert_array_equal(t.result, before)
+    assert (new.id, new.particle, new.energy.total) == (t.id, t.particle, True)
+    # bins and mesh are kept, the Total bin is the one given
+    np.testing.assert_array_equal(
+        new.isel(energy="total").result[0], new.result[new.energy.total_index]
+    )
+    assert (new + t).shape == t.shape
+
+
+def test_with_values_of_another_shape(parsed):
+    t = _tally(parsed, 14)
+    for result, rel_error in (
+        (t.result[..., :-1], t.rel_error),
+        (t.result, t.rel_error[..., :-1]),
+    ):
+        with pytest.raises(ValueError, match="different shapes"):
+            t.with_values(result, rel_error)
+    with pytest.raises(TypeError):
+        t.with_values(t.result[0], t.rel_error)

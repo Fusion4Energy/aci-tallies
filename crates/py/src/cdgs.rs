@@ -165,3 +165,5 @@ impl PyCdgsInfo {
         )
     }
 }
+
+crate::common::immutable!(PyCdgsFile, PyCdgsInfo);

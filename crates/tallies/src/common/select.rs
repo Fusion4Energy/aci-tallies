@@ -9,7 +9,7 @@ use super::Axis;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum OpsError {
-    #[error("tallies have different shapes: {0:?} and {1:?}")]
+    #[error("different shapes: {0:?} and {1:?}")]
     ShapeMismatch(Vec<usize>, Vec<usize>),
     #[error("tallies have different {0} bins")]
     BinningMismatch(&'static str),

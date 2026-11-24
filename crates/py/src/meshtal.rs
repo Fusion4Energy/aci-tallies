@@ -6,7 +6,7 @@ use std::sync::Arc;
 use aci_tallies::common::{Axis, Warning};
 use aci_tallies::meshtal::{ops, Reader, Select, Tally, TallyInfo};
 use ndarray::{s, Array5};
-use numpy::{PyArray3, PyArray5};
+use numpy::{AllowTypeChange, PyArray3, PyArray5, PyArrayLike5};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyString;
@@ -571,6 +571,24 @@ impl PyMeshTally {
         PyMeshTally::new(py, py.allow_threads(|| ops::integrate_space(t)))
     }
 
+    /// A tally with these values instead: the same id, bins, mesh and
+    /// volumes, no warnings (they were about reading). `result` and
+    /// `rel_error` must have this tally's shape, and are copied. Total bins
+    /// are values like any other: nothing is recomputed.
+    fn with_values(
+        &self,
+        py: Python<'_>,
+        result: PyArrayLike5<'_, f64, AllowTypeChange>,
+        rel_error: PyArrayLike5<'_, f64, AllowTypeChange>,
+    ) -> PyResult<PyMeshTally> {
+        let copy = |a: &PyArrayLike5<'_, f64, AllowTypeChange>| {
+            a.as_array().as_standard_layout().into_owned()
+        };
+        let out =
+            ops::with_values(&self.tally, copy(&result), copy(&rel_error)).map_err(ops_error)?;
+        PyMeshTally::new(py, out)
+    }
+
     fn __add__(&self, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         self.binary(py, other, ops::add, None)
     }
@@ -664,3 +682,5 @@ impl PyMeshTally {
         call(slf, "aci_tallies._html", "mesh_tally", ())
     }
 }
+
+crate::common::immutable!(PyMeshtalFile, PyTallyInfo, PyMeshTally);
